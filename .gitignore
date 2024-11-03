@@ -1,0 +1,6 @@
+.env
+.git
+target/*
+mnt/*
+__pycache__/*
+.cargo/*

@@ -1,0 +1,29 @@
+[package]
+name = "server"
+version = "0.1.0"
+edition = "2021"
+
+
+[dependencies]
+actix-web = "4.0"
+diesel = { version = "2.0", features = ["postgres", "r2d2", "chrono", "uuid"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.128"
+dotenv = "0.15"
+env_logger = "0.11.5"
+r2d2 = "0.8"
+uuid = { version = "1.0", features = ["serde", "v4"] }
+sha2 = "0.10.8"
+hex = "0.4"
+once_cell = "1.20.2"
+rand = "0.8"
+actix-session = {version = "0.10.1", features = ["cookie-session"]}
+log = "0.4.22"
+
+
+[dependencies.actix-rt]
+version = "2.6"
+
+[build-dependencies]
+diesel = { version = "2.0", features = ["postgres"] }
+
