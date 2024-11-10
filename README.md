@@ -1,6 +1,6 @@
 # About
 
-The backend of yuanyang.app 2025, deployed on alicloud.
+The backend of [yuanyang.app](https://yuanyang.app) 2025, deployed on alicloud as [FC](https://help.aliyun.com/zh/functioncompute/fc-3-0/).
 
 # Development
 
@@ -13,6 +13,7 @@ DATABASE_URL=postgres://<user>:<password>@<server>/<dbname>
 REGISTER_TOKEN=
 LOGIN_TOKEN=
 COOKIE_TOKEN=
+VERIFY_TOKEN=
 ```
 
 ## Database

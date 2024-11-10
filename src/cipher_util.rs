@@ -170,6 +170,6 @@ pub fn verify(openid: &str, verify_session: &str, veri_code: &str) -> bool {
     hasher.update(verify_session);
     hasher.update(openid);
     hasher.update(VERIFY_TOKEN.as_str());
-    let result = hex::encode_upper(hasher.finalize().as_slice());
+    let result = hex::encode(hasher.finalize().as_slice());
     veri_code.len() == 8 && result.starts_with(veri_code)
 }

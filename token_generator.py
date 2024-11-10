@@ -32,7 +32,7 @@ load_env()
 
 salt = os.environ["REGISTER_TOKEN"]
 
-print(salt)
+# print(salt)
 
 def genenrate_openid():
     c = SystemRandom()
@@ -82,7 +82,19 @@ def get_token(version, mark, openid):
     
 token = get_token(2, 4, genenrate_openid())
 
-print(token.hex())
+# print(token.hex())
 
 # raw  028312ec8e8bdd45bc29818a2a83ddd009a15107243901b81742042f47e6428f
 # hash a364690f58d89c90fd7843b3ca306c27f5f62a9ea024c1b4aed4fc74fc686471
+
+verify_token = os.environ["VERIFY_TOKEN"]
+
+
+#openid: lower case hex humber, which length is 168 bits or 42 hexadecimal digits
+def vericode(very_session: str, openid: str) -> str:
+    hash = hashlib.sha512(very_session.encode())
+    hash.update(openid.encode())
+    hash.update(verify_token.encode())
+    hash = hash.digest()
+    
+    return hash.hex()[:8]

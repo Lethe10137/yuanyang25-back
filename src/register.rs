@@ -227,11 +227,18 @@ async fn login_user(
 
     HttpResponse::Ok().json(result)
 }
-// For debug
+
+// For debug only!
 #[get("/user")]
 async fn get_user(session: Session) -> impl Responder {
-    if let Some(user_id) = session.get::<i32>("user_id").unwrap() {
-        HttpResponse::Ok().body(format!("User ID: {}", user_id))
+    if let (Ok(Some(user_id)), Ok(Some(user_priveledge))) = (
+        session.get::<i32>(SESSION_USER_ID),
+        session.get::<i32>(SESSION_PRIVILEDGE),
+    ) {
+        HttpResponse::Ok().body(format!(
+            "Priveledge {}, User id {}",
+            user_priveledge, user_id
+        ))
     } else {
         HttpResponse::Unauthorized().body("No user logged in")
     }
