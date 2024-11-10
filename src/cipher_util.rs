@@ -1,12 +1,11 @@
+use dotenv::dotenv;
+use once_cell::sync::Lazy;
 use serde::ser::SerializeStruct;
-use sha2::{Digest, Sha256, Sha512};
-
-use std::convert::TryInto;
-
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
 use serde::Serialize;
-
+use sha2::{Digest, Sha256, Sha512};
+use std::convert::TryInto;
+use std::env;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 const EXPIRE_MIINUTES: u64 = 5;
 
 #[derive(Debug, Clone)]
@@ -121,10 +120,56 @@ pub fn gen_salted_password(password: &str, token: &str) -> (String, String) {
     (hex::encode(salt), hex::encode(calculated_hash.as_slice()))
 }
 
+pub fn check_salted_password<'a>(
+    user: &'a User,
+    password_input: &str,
+    token: &str,
+) -> Option<&'a User> {
+    let mut salt = [0u8; 32];
+    hex::decode_to_slice(&user.salt, &mut salt).ok()?;
+    let mut hasher = Sha256::new();
+    hasher.update(token);
+    hasher.update(password_input);
+    hasher.update(salt);
+
+    let calculated_hash = hasher.finalize();
+
+    let mut expected_hash = [0u8; 32];
+    hex::decode_to_slice(&user.password, &mut expected_hash).ok()?;
+
+    if calculated_hash.as_slice() == &expected_hash[..] {
+        Some(user)
+    } else {
+        None
+    }
+}
+
 use actix_web::cookie::Key;
+
+use crate::models::User;
 
 pub fn gen_cookie_key(cookie_token: &str) -> Key {
     let mut hasher = Sha512::new();
     hasher.update(cookie_token);
     Key::from(hasher.finalize().as_slice())
+}
+
+static VERIFY_TOKEN: Lazy<String> = Lazy::new(|| {
+    dotenv().ok();
+    env::var("VERIFY_TOKEN").expect("Environment variable VERIFY_TOKEN not set")
+});
+
+pub fn gen_verify_session() -> String {
+    let mut salt = [0u8; 4];
+    OsRng.fill_bytes(&mut salt);
+    hex::encode(salt)
+}
+
+pub fn verify(openid: &str, verify_session: &str, veri_code: &str) -> bool {
+    let mut hasher = Sha512::new();
+    hasher.update(verify_session);
+    hasher.update(openid);
+    hasher.update(VERIFY_TOKEN.as_str());
+    let result = hex::encode_upper(hasher.finalize().as_slice());
+    veri_code.len() == 8 && result.starts_with(veri_code)
 }

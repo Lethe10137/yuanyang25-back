@@ -11,3 +11,18 @@ macro_rules! sanity {
         }
     };
 }
+
+#[macro_export]
+macro_rules! internal_error {
+    ($e:expr, $msg:expr) => {{
+        error!("{}", $e);
+        return HttpResponse::InternalServerError().body(format!(
+            "System error {}! Contact ch-li21@mails.tsinghua.edu.cn.",
+            $msg
+        ));
+    }};
+}
+
+pub static SESSION_USER_ID: &str = "user_id";
+pub static SESSION_PRIVILEDGE: &str = "user_priviledge";
+pub static SESSION_VERIFY: &str = "session_verify";

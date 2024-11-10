@@ -1,4 +1,5 @@
 use crate::api_util::APIRequest;
+use crate::schema::users;
 use actix_web::{get, post, web, HttpResponse, Responder};
 use dotenv::dotenv;
 use once_cell::sync::Lazy;
@@ -11,7 +12,10 @@ use crate::cipher_util::DecodeTokenError;
 use crate::models::User;
 use crate::{cipher_util, schema, DbPool};
 
-use actix_session::Session;
+use actix_session::{Session, SessionInsertError};
+use log::{error, info};
+
+use crate::api_util::{SESSION_PRIVILEDGE, SESSION_USER_ID, SESSION_VERIFY};
 
 #[derive(Debug, Deserialize)]
 struct RegisterRequest {
@@ -40,9 +44,37 @@ enum RegisterResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct LoginData {
-    userid: String,
-    verification: String,
+struct LoginRequest {
+    userid: i32,
+    auth: AuthMethod,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "method", content = "data")]
+enum AuthMethod {
+    Password(String),
+    Verification(String),
+}
+
+impl APIRequest for LoginRequest {
+    fn sanity(self) -> Option<Self> {
+        let ok = match &self.auth {
+            AuthMethod::Password(pw) => pw.len() == 64,
+            AuthMethod::Verification(veri) => veri.len() == 8,
+        };
+
+        if ok {
+            Some(self)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+enum LoginResponse {
+    Success(i32),
+    Error,
 }
 
 static LOGIN_TOKEN: Lazy<String> = Lazy::new(|| {
@@ -55,7 +87,15 @@ static REGISTER_TOKEN: Lazy<String> = Lazy::new(|| {
     env::var("REGISTER_TOKEN").expect("Environment variable REGISTER_TOKEN not set")
 });
 
-use log::{error, info};
+fn set_loggedin_session(
+    session: &mut Session,
+    id: i32,
+    priviledge: i32,
+) -> Result<(), SessionInsertError> {
+    session.insert(SESSION_USER_ID, id)?;
+    session.insert(SESSION_PRIVILEDGE, priviledge)?;
+    Ok(())
+}
 
 // [[API]]
 // Description: Register or update password with token from wechat.
@@ -68,12 +108,12 @@ use log::{error, info};
 async fn register_user(
     pool: web::Data<DbPool>,
     form: web::Json<RegisterRequest>,
-    session: Session,
+    mut session: Session,
 ) -> impl Responder {
     use schema::users;
-    let mut conn = pool.get().expect("Failed to get DB connection");
 
     let form = sanity!(form);
+    let mut conn = pool.get().expect("Failed to get DB connection");
 
     let response = match cipher_util::decode_token(&form.token, REGISTER_TOKEN.as_str()) {
         Ok((_version, mark, openid)) => {
@@ -102,17 +142,15 @@ async fn register_user(
             match result {
                 Ok(u) => {
                     session.clear();
-                    if let Err(e) = session.insert("user_id", u.id) {
-                        error!("{}", e);
+                    if let Err(e) = set_loggedin_session(&mut session, u.id, u.priviledge) {
+                        internal_error!(e, "login_session");
                     } else {
                         info!("Setting cookie for user {}", u.id);
                     }
                     RegisterResponse::Success(u.id)
                 }
                 Err(e) => {
-                    error!("{}", e);
-                    return HttpResponse::InternalServerError()
-                        .body("Database error! Contact ch-li21@mails.tsinghua.edu.cn.");
+                    internal_error!(e, "register_database")
                 }
             }
         }
@@ -122,6 +160,74 @@ async fn register_user(
     HttpResponse::Ok().json(response)
 }
 
+// [[API]]
+// Description: Login with password.
+// Method: Post
+// URL: /login
+// Request Body: `LoginRequest`
+// Response Body: `LoginResponse`
+//
+#[post("/login")]
+async fn login_user(
+    pool: web::Data<DbPool>,
+    form: web::Json<LoginRequest>,
+    mut session: Session,
+) -> impl Responder {
+    let form = sanity!(form);
+
+    let id = form.userid;
+    let mut conn = pool.get().expect("Failed to get DB connection");
+
+    let result: LoginResponse = if let Ok(user) = users::table
+        .filter(users::id.eq(id))
+        .get_result::<User>(&mut conn)
+    {
+        match form.auth {
+            AuthMethod::Password(pw) => {
+                if let Some(user) =
+                    cipher_util::check_salted_password(&user, pw.as_str(), &LOGIN_TOKEN)
+                {
+                    session.clear();
+                    if let Err(e) = set_loggedin_session(&mut session, user.id, user.priviledge) {
+                        internal_error!(e, "login_session");
+                    } else {
+                        info!("Setting cookie for user {}", user.id);
+                    }
+                    LoginResponse::Success(user.id)
+                } else {
+                    LoginResponse::Error
+                }
+            }
+            AuthMethod::Verification(veri) => {
+                if let Some(verify_session) = session.get::<String>(SESSION_VERIFY).unwrap() {
+                    if cipher_util::verify(
+                        user.openid.as_str(),
+                        verify_session.as_str(),
+                        veri.as_str(),
+                    ) {
+                        session.clear();
+                        if let Err(e) = set_loggedin_session(&mut session, user.id, user.priviledge)
+                        {
+                            internal_error!(e, "login_session");
+                        } else {
+                            info!("Setting cookie for user {}", user.id);
+                        }
+                        LoginResponse::Success(id)
+                    } else {
+                        LoginResponse::Error
+                    }
+                } else {
+                    LoginResponse::Error
+                }
+            }
+        }
+    } else {
+        LoginResponse::Error
+    };
+
+    HttpResponse::Ok().json(result)
+}
+// For debug
 #[get("/user")]
 async fn get_user(session: Session) -> impl Responder {
     if let Some(user_id) = session.get::<i32>("user_id").unwrap() {

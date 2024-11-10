@@ -11,6 +11,7 @@ mod cipher_util;
 mod models;
 mod register;
 mod schema;
+mod vericode;
 
 type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
 
@@ -50,6 +51,8 @@ async fn main() -> std::io::Result<()> {
             )
             .service(register::register_user)
             .service(register::get_user)
+            .service(register::login_user)
+            .service(vericode::vericode)
     })
     .bind("0.0.0.0:9000")?
     .run()
