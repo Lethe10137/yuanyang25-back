@@ -1,5 +1,6 @@
-use crate::api_util::APIRequest;
 use crate::schema::users;
+use crate::util::api_util::APIRequest;
+use crate::{internal_error, sanity};
 use actix_web::{get, post, web, HttpResponse, Responder};
 use dotenv::dotenv;
 use once_cell::sync::Lazy;
@@ -8,14 +9,14 @@ use std::env;
 
 use diesel::prelude::*;
 
-use crate::cipher_util::DecodeTokenError;
 use crate::models::User;
-use crate::{cipher_util, schema, DbPool};
+use crate::util::cipher_util::DecodeTokenError;
+use crate::{schema, util::cipher_util, DbPool};
 
 use actix_session::{Session, SessionInsertError};
 use log::{error, info};
 
-use crate::api_util::{SESSION_PRIVILEDGE, SESSION_USER_ID};
+use crate::util::api_util::{SESSION_PRIVILEDGE, SESSION_USER_ID};
 
 #[derive(Debug, Deserialize)]
 struct RegisterRequest {

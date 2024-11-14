@@ -5,14 +5,8 @@ use actix_web::{web, App, HttpServer};
 use diesel::prelude::*;
 use diesel::r2d2::{self, ConnectionManager};
 
-#[macro_use]
-mod api_util;
-mod cipher_util;
-mod models;
-mod register;
-mod schema;
-
-type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
+use server::api::register;
+use server::util::cipher_util;
 
 use actix_session::{storage::CookieSessionStore, SessionMiddleware};
 use log::warn;
