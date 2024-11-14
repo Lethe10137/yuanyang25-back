@@ -25,4 +25,3 @@ macro_rules! internal_error {
 
 pub static SESSION_USER_ID: &str = "user_id";
 pub static SESSION_PRIVILEDGE: &str = "user_priviledge";
-pub static SESSION_VERIFY: &str = "session_verify";

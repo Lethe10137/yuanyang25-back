@@ -91,10 +91,16 @@ verify_token = os.environ["VERIFY_TOKEN"]
 
 
 #openid: lower case hex humber, which length is 168 bits or 42 hexadecimal digits
-def vericode(very_session: str, openid: str) -> str:
-    hash = hashlib.sha512(very_session.encode())
+def vericode(openid: str) -> str:
+    hash = hashlib.sha512()
     hash.update(openid.encode())
     hash.update(verify_token.encode())
+    
+    t = int(time.time()) // 120
+    
+    byte_array = (t & 0xFFFFFFFFFFFFFFFF).to_bytes(8, byteorder='little')
+    hash.update(byte_array)
+    
     hash = hash.digest()
     
     return hash.hex()[:8]

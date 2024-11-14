@@ -15,7 +15,7 @@ use crate::{cipher_util, schema, DbPool};
 use actix_session::{Session, SessionInsertError};
 use log::{error, info};
 
-use crate::api_util::{SESSION_PRIVILEDGE, SESSION_USER_ID, SESSION_VERIFY};
+use crate::api_util::{SESSION_PRIVILEDGE, SESSION_USER_ID};
 
 #[derive(Debug, Deserialize)]
 struct RegisterRequest {
@@ -199,23 +199,14 @@ async fn login_user(
                 }
             }
             AuthMethod::Verification(veri) => {
-                if let Some(verify_session) = session.get::<String>(SESSION_VERIFY).unwrap() {
-                    if cipher_util::verify(
-                        user.openid.as_str(),
-                        verify_session.as_str(),
-                        veri.as_str(),
-                    ) {
-                        session.clear();
-                        if let Err(e) = set_loggedin_session(&mut session, user.id, user.priviledge)
-                        {
-                            internal_error!(e, "login_session");
-                        } else {
-                            info!("Setting cookie for user {}", user.id);
-                        }
-                        LoginResponse::Success(id)
+                if cipher_util::verify(user.openid.as_str(), veri.as_str()) {
+                    session.clear();
+                    if let Err(e) = set_loggedin_session(&mut session, user.id, user.priviledge) {
+                        internal_error!(e, "login_session");
                     } else {
-                        LoginResponse::Error
+                        info!("Setting cookie for user {}", user.id);
                     }
+                    LoginResponse::Success(id)
                 } else {
                     LoginResponse::Error
                 }

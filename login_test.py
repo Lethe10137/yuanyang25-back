@@ -7,7 +7,7 @@ url = "http://127.0.0.1:9000"
 
 import token_generator
 
-openid = 0x7
+openid = 0x10
 pw = "12348129371987298"
 
 pw = hashlib.sha256(pw.encode()).hexdigest()
@@ -85,12 +85,7 @@ res = s.post(url + "/login", json={
 })
 assert(res.status_code >= 400)
 
-res = s.get(url + "/vericode")
-
-print("vericode session:", res.text)
-veri = res.text.strip("\"")
-
-vericode = token_generator.vericode(veri,f"{openid:042x}")
+vericode = token_generator.vericode(f"{openid:042x}")
 
 print("verification code:", vericode)
 

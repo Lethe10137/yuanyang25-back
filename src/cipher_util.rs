@@ -159,17 +159,25 @@ static VERIFY_TOKEN: Lazy<String> = Lazy::new(|| {
     env::var("VERIFY_TOKEN").expect("Environment variable VERIFY_TOKEN not set")
 });
 
-pub fn gen_verify_session() -> String {
-    let mut salt = [0u8; 4];
-    OsRng.fill_bytes(&mut salt);
-    hex::encode(salt)
+fn totp(user_openid: &str, time: u64) -> String {
+    let mut hasher = Sha512::new();
+    hasher.update(user_openid);
+    hasher.update(VERIFY_TOKEN.as_str());
+    hasher.update(time.to_le_bytes());
+
+    hex::encode(hasher.finalize().as_slice())
 }
 
-pub fn verify(openid: &str, verify_session: &str, veri_code: &str) -> bool {
-    let mut hasher = Sha512::new();
-    hasher.update(verify_session);
-    hasher.update(openid);
-    hasher.update(VERIFY_TOKEN.as_str());
-    let result = hex::encode(hasher.finalize().as_slice());
-    veri_code.len() == 8 && result.starts_with(veri_code)
+pub fn verify(user_openid: &str, veri_code: &str) -> bool {
+    let time = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_secs()
+        / 120;
+
+    // Allowing 2 minutes of error
+    veri_code.len() == 8
+        && (totp(user_openid, time).starts_with(veri_code)
+            || totp(user_openid, time - 1).starts_with(veri_code)
+            || totp(user_openid, time + 1).starts_with(veri_code))
 }
