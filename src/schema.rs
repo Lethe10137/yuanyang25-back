@@ -60,7 +60,7 @@ diesel::table! {
         id -> Int4,
         is_staff -> Bool,
         token_balance -> Int8,
-        comfirmed -> Bool,
+        confirmed -> Bool,
         max_size -> Int4,
         size -> Int4,
     }
@@ -71,7 +71,7 @@ diesel::table! {
         id -> Int4,
         team -> Int4,
         #[max_length = 255]
-        description -> Varchar,
+        desp -> Varchar,
         amount -> Int8,
         balance -> Int8,
         time -> Timestamptz,
@@ -99,7 +99,17 @@ diesel::table! {
         password -> Varchar,
         #[max_length = 64]
         salt -> Varchar,
-        priviledge -> Int4,
+        privilege -> Int4,
+    }
+}
+
+diesel::table! {
+    vericode (id) {
+        id -> Int4,
+        #[max_length = 16]
+        code -> Varchar,
+        updated_at -> Timestamptz,
+        team_id -> Int4,
     }
 }
 
@@ -113,6 +123,7 @@ diesel::joinable!(transaction -> team (team));
 diesel::joinable!(unlock -> puzzle (puzzle));
 diesel::joinable!(unlock -> team (team));
 diesel::joinable!(users -> team (team));
+diesel::joinable!(vericode -> team (team_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     hint,
@@ -124,4 +135,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     transaction,
     unlock,
     users,
+    vericode,
 );

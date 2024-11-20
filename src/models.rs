@@ -1,5 +1,5 @@
 use diesel::prelude::*;
-#[allow(dead_code)]
+
 #[derive(Queryable, Selectable)]
 #[diesel(table_name = crate::schema::users)]
 pub struct User {
@@ -9,5 +9,16 @@ pub struct User {
     pub username: String,
     pub password: String,
     pub salt: String,
-    pub priviledge: i32,
+    pub privilege: i32,
+}
+
+#[derive(Queryable, Selectable)]
+#[diesel(table_name = crate::schema::team)]
+pub struct Team {
+    pub id: i32,
+    pub is_staff: bool,
+    pub token_balance: i64,
+    pub confirmed: bool,
+    pub max_size: i32,
+    pub size: i32,
 }

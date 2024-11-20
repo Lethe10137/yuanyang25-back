@@ -27,27 +27,27 @@ impl Serialize for DecodeTokenError {
             DecodeTokenError::Expired(duration) => {
                 state.serialize_field("type", "Expired")?;
                 state.serialize_field(
-                    "description",
+                    "desp",
                     format!("Expired {} seconds ago.", &duration.as_secs()).as_str(),
                 )?;
             }
             DecodeTokenError::InvalidContent(token) => {
                 state.serialize_field("type", "InvalidContent")?;
                 state.serialize_field(
-                    "description",
+                    "desp",
                     format!("Invalid register token {}.", &token).as_str(),
                 )?;
             }
             DecodeTokenError::InvalidFormat => {
                 state.serialize_field("type", "InvalidFormat")?;
                 state.serialize_field(
-                    "description",
+                    "desp",
                     "Register token should be a 64-digit hexadecimal number.",
                 )?;
             }
             DecodeTokenError::Unknown => {
                 state.serialize_field("type", "Unknown")?;
-                state.serialize_field("description", "An unknown error occurred.")?;
+                state.serialize_field("desp", "An unknown error occurred.")?;
             }
         }
 

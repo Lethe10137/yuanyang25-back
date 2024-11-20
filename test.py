@@ -6,14 +6,12 @@ url = "http://127.0.0.1:9000"
 
 
 import token_generator
+import time
 
-openid = 0x10
+openid = time.time_ns()
 pw = "12348129371987298"
-
 pw = hashlib.sha256(pw.encode()).hexdigest()
-
 code = token_generator.get_token(2,4,openid).hex()
-
 s = requests.session()
 
 
@@ -24,11 +22,10 @@ res = s.post(url + "/register", json={
     "token" : code
 })
 
-
 res = s.get(url + "/user") 
 print("Response for /user:", res.text)
 
-assert(res.text.startswith("Priveledge"))
+assert(res.text.startswith("Privilege"))
 
 user_id = int(res.text.split(" ")[-1])
 
@@ -49,7 +46,7 @@ res = s.post(url + "/login", json={
     }
 })
 
-print(res.json())
+print(res.text)
 assert(res.json() == "Error")
 
 #use password to verificate, expected to success!
@@ -61,12 +58,12 @@ res = s.post(url + "/login", json={
     }
 })
 
-print(res.json())
+print(res.text)
 assert("Success" in res.json())
 
 res = s.get(url + "/user")  
 print("Response for /user:", res.text)
-assert(res.text.startswith("Priveledge"))
+assert(res.text.startswith("Privilege"))
 
 print("\n+++++++++++ New Session ++++++++++")
 
@@ -79,10 +76,11 @@ assert(res.text.startswith("No user"))
 res = s.post(url + "/login", json={
     "userid" : user_id,
     "auth": {
-        "method" : "Verification",
+        "method" : "Totp",
         "data": "083ab3d834"
     }
 })
+print(res.text)
 assert(res.status_code >= 400)
 
 vericode = token_generator.vericode(f"{openid:042x}")
@@ -92,19 +90,25 @@ print("verification code:", vericode)
 res = s.post(url + "/login", json={
     "userid" : user_id,
     "auth": {
-        "method" : "Verification",
+        "method" : "Totp",
         "data": vericode
     }
 })
-print(res.json())
+print(res.text)
 assert("Success" in res.json())
 
 res = s.get(url + "/user")  # 例如：获取用户信息
 print("Response for /user:", res.text)
 
-assert(res.text.startswith("Priveledge"))
+assert(res.text.startswith("Privilege"))
 
+res = s.post(url + "/create_team")
+print(res.text)
+assert("Success" in res.json())
 
+res = s.post(url + "/create_team")
+print(res.text)
+assert("AlreadyInTeam" in res.json())
 
 
 
