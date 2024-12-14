@@ -1,5 +1,6 @@
 use crate::schema::users;
 use crate::util::api_util::*;
+use crate::VERICODE_LENGTH;
 
 use actix_web::{get, post, web, HttpResponse, Responder};
 use dotenv::dotenv;
@@ -58,13 +59,14 @@ impl APIRequest for LoginRequest {
     fn ok(&self) -> bool {
         match &self.auth {
             AuthMethod::Password(pw) => pw.len() == 64,
-            AuthMethod::Totp(veri) => veri.len() == 8,
+            AuthMethod::Totp(veri) => veri.len() == VERICODE_LENGTH,
         }
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 enum LoginResponse {
+    //Returns the user id
     Success(i32),
     Error,
 }
@@ -110,12 +112,10 @@ async fn register_user(
     use schema::users;
 
     let location = "register";
-
     form.sanity()?;
-    let mut conn = pool.get().map_err(|_| APIError::ServerError {
-        location,
-        msg: ERROR_DB_CONNECTION,
-    })?;
+    let mut conn = pool
+        .get()
+        .map_err(|e| log_server_error(e, location, ERROR_DB_CONNECTION))?;
 
     let response = match cipher_util::decode_token(form.token.as_str(), REGISTER_TOKEN.as_str()) {
         Ok((_version, mark, openid)) => {
@@ -165,13 +165,13 @@ async fn login_user(
     form: web::Json<LoginRequest>,
     mut session: Session,
 ) -> Result<impl Responder, APIError> {
+    let location = "login";
     form.sanity()?;
+    let mut conn = pool
+        .get()
+        .map_err(|e| log_server_error(e, location, ERROR_DB_CONNECTION))?;
 
     let id = form.userid;
-    let mut conn = pool.get().map_err(|_| APIError::ServerError {
-        location: "login",
-        msg: ERROR_DB_CONNECTION,
-    })?;
 
     let result: LoginResponse = if let Ok(user) = users::table
         .filter(users::id.eq(id))
@@ -192,8 +192,7 @@ async fn login_user(
                 }
             }
             AuthMethod::Totp(veri) => {
-                if cipher_util::verify(user.openid.as_str(), veri.as_str()) {
-                    session.clear();
+                if cipher_util::verify_totp(user.openid.as_str(), veri.as_str()) {
                     session.clear();
                     set_loggedin_session(&mut session, user.id, user.privilege, "login_totp")?;
                     info!("Setting cookie for user {}", user.id);

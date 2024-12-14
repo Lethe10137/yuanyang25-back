@@ -63,6 +63,8 @@ diesel::table! {
         confirmed -> Bool,
         max_size -> Int4,
         size -> Int4,
+        #[max_length = 64]
+        salt -> Varchar,
     }
 }
 

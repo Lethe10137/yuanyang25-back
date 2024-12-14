@@ -22,6 +22,7 @@ CREATE TABLE "team" (
 	"confirmed" BOOLEAN NOT NULL DEFAULT false,
 	"max_size" INTEGER NOT NULL DEFAULT 3,
 	"size" INTEGER NOT NULL DEFAULT 0,
+	"salt" VARCHAR(64) NOT NULL,
 	PRIMARY KEY("id")
 );
 

@@ -21,6 +21,7 @@ actix-session = {version = "0.10.1", features = ["cookie-session"]}
 log = "0.4.22"
 derive_more = "1.0.0"
 
+
 [dependencies.actix-rt]
 version = "2.6"
 

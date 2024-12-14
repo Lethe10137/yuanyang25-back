@@ -107,9 +107,14 @@ pub fn decode_token(hex_input: &str, token: &str) -> Result<(u8, u8, String), De
 use rand::rngs::OsRng;
 use rand::RngCore;
 
-pub fn gen_salted_password(password: &str, token: &str) -> (String, String) {
-    let mut salt = [0u8; 32];
+pub fn get_salt<const N: usize>() -> [u8; N] {
+    let mut salt = [0u8; N];
     OsRng.fill_bytes(&mut salt);
+    salt
+}
+
+pub fn gen_salted_password(password: &str, token: &str) -> (String, String) {
+    let salt = get_salt::<32>();
 
     let mut hasher = Sha256::new();
     hasher.update(token);
@@ -159,25 +164,35 @@ static VERIFY_TOKEN: Lazy<String> = Lazy::new(|| {
     env::var("VERIFY_TOKEN").expect("Environment variable VERIFY_TOKEN not set")
 });
 
-fn totp(user_openid: &str, time: u64) -> String {
+fn current_totp_time() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_secs()
+        / 120
+}
+
+fn totp(token_id: &str, time: u64) -> String {
     let mut hasher = Sha512::new();
-    hasher.update(user_openid);
+    hasher.update(token_id);
     hasher.update(VERIFY_TOKEN.as_str());
     hasher.update(time.to_le_bytes());
 
     hex::encode(hasher.finalize().as_slice())
 }
 
-pub fn verify(user_openid: &str, veri_code: &str) -> bool {
-    let time = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards")
-        .as_secs()
-        / 120;
+pub fn gen_totp(identity: &str) -> String {
+    totp(identity, current_totp_time())
+}
+
+// For user, identity is the open_id
+// For group, identiy is the salt
+pub fn verify_totp(identity: &str, veri_code: &str) -> bool {
+    let time = current_totp_time();
 
     // Allowing 2 minutes of error
-    veri_code.len() == 8
-        && (totp(user_openid, time).starts_with(veri_code)
-            || totp(user_openid, time - 1).starts_with(veri_code)
-            || totp(user_openid, time + 1).starts_with(veri_code))
+    veri_code.len() == crate::VERICODE_LENGTH
+        && (totp(identity, time).starts_with(veri_code)
+            || totp(identity, time - 1).starts_with(veri_code)
+            || totp(identity, time + 1).starts_with(veri_code))
 }

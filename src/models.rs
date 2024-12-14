@@ -21,4 +21,5 @@ pub struct Team {
     pub confirmed: bool,
     pub max_size: i32,
     pub size: i32,
+    pub salt: String,
 }

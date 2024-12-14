@@ -1,2 +1,2 @@
-pub mod group;
 pub mod register;
+pub mod team;

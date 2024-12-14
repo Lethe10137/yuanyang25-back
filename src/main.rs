@@ -5,7 +5,7 @@ use actix_web::{web, App, HttpServer};
 use diesel::prelude::*;
 use diesel::r2d2::{self, ConnectionManager};
 
-use server::api::{group, register};
+use server::api::{register, team};
 use server::util::cipher_util;
 
 use actix_session::{storage::CookieSessionStore, SessionMiddleware};
@@ -45,7 +45,10 @@ async fn main() -> std::io::Result<()> {
             .service(register::register_user)
             .service(register::get_user)
             .service(register::login_user)
-            .service(group::create_team)
+            .service(team::create_team)
+            .service(team::team_veri)
+            .service(team::join_team)
+            .service(team::exit_team)
     })
     .bind("0.0.0.0:9000")?
     .run()
