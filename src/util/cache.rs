@@ -10,9 +10,7 @@ use crate::util::api_util::fetch_puzzle_from_id;
 
 use super::api_util::{fetch_unlock_time, APIError};
 
-type DbPool = Pool<ConnectionManager<PgConnection>>;
-
-use diesel::{pg::Pg, result::Error};
+use crate::DbPool;
 
 use diesel_async::AsyncPgConnection;
 

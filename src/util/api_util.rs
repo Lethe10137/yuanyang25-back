@@ -5,7 +5,7 @@ use actix_web::{
     HttpResponse,
 };
 use chrono::{DateTime, Utc};
-use diesel::{pg::Pg, result::Error};
+use diesel::result::Error;
 
 use derive_more::derive::Display;
 use diesel::prelude::*;

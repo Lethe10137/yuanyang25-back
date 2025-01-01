@@ -5,7 +5,6 @@ use actix_web::{web, App, HttpServer};
 
 use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
 use diesel_async::AsyncPgConnection;
-use diesel_async::RunQueryDsl;
 
 use server::api::{register, team};
 use server::util::cipher_util;
@@ -23,12 +22,10 @@ async fn main() -> std::io::Result<()> {
     let cookie_token = std::env::var("COOKIE_TOKEN").expect("COOKIE_TOKEN must be set");
 
     let manager = AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
-    let pool = Pool::builder()
+    let pool : DbPool = Pool::builder()
         .build(manager)
         .await
         .expect("Failed to link to db");
-
-
 
     let secret_key = cipher_util::gen_cookie_key(&cookie_token);
 

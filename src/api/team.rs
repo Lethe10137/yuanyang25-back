@@ -13,7 +13,6 @@ use crate::{DbPool, Ext, VERICODE_LENGTH};
 
 use actix_session::Session;
 
-
 #[derive(Debug, Serialize)]
 enum CreateTeamResponse {
     Success { id: i32 },
@@ -264,7 +263,10 @@ enum ExitTeamResponse {
 // Request Body: N/A
 // Response Body: `ExitTeamResponse`
 #[post("/exit_team")]
-async fn exit_team(pool: web::Data<DbPool>, mut session: Session) -> Result<impl Responder, APIError> {
+async fn exit_team(
+    pool: web::Data<DbPool>,
+    mut session: Session,
+) -> Result<impl Responder, APIError> {
     let location = "exit_team";
 
     let (user_id, _) = user_privilege_check(&session, PRIVILEGE_MINIMAL)?;
@@ -292,13 +294,15 @@ async fn exit_team(pool: web::Data<DbPool>, mut session: Session) -> Result<impl
                         // Update the user's team reference
                         diesel::update(users::table.filter(users::id.eq(user_id)))
                             .set(users::team.eq::<Option<i32>>(None))
-                            .execute(conn).await
+                            .execute(conn)
+                            .await
                             .map_err(|e| log_server_error(e, location, ERROR_DB_UNKNOWN))?;
 
                         // Update the team's size
                         diesel::update(team::table.filter(team::id.eq(team.id)))
                             .set(team::size.eq(team.size - 1))
-                            .execute(conn).await
+                            .execute(conn)
+                            .await
                             .map_err(|e| log_server_error(e, location, ERROR_DB_UNKNOWN))?;
 
                         Ok((ExitTeamResponse::Success { id: team.id }, kill_session))

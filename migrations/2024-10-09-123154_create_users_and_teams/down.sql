@@ -24,6 +24,7 @@ DROP INDEX IF EXISTS "mid_answer_index_0";
 DROP INDEX IF EXISTS "hint_index_0";
 DROP INDEX IF EXISTS "oracle_index_0";
 DROP INDEX IF EXISTS "unlock_index_0";
+DROP INDEX IF EXISTS "unlock_team_puzzle_idx";
 DROP INDEX IF EXISTS "transaction_index_0";
 
 -- 删除表
