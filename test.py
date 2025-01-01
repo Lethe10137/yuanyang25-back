@@ -24,6 +24,8 @@ res = s.post(url + "/register", json={
     "token" : code
 })
 
+print("Response for /register:", res.text)
+
 res = s.get(url + "/user") 
 print("Response for /user:", res.text)
 

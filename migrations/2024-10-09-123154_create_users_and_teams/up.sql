@@ -34,6 +34,7 @@ CREATE TABLE "puzzle" (
 	"bounty" INTEGER NOT NULL,
 	"title" VARCHAR(64) NOT NULL,
 	"answer" VARCHAR(64) NOT NULL,
+	"key" VARCHAR(64) NOT NULL,
 	"content" TEXT NOT NULL,
 	PRIMARY KEY("id")
 );

@@ -41,6 +41,8 @@ diesel::table! {
         title -> Varchar,
         #[max_length = 64]
         answer -> Varchar,
+        #[max_length = 64]
+        key -> Varchar,
         content -> Text,
     }
 }
@@ -105,16 +107,6 @@ diesel::table! {
     }
 }
 
-diesel::table! {
-    vericode (id) {
-        id -> Int4,
-        #[max_length = 16]
-        code -> Varchar,
-        updated_at -> Timestamptz,
-        team_id -> Int4,
-    }
-}
-
 diesel::joinable!(hint -> puzzle (puzzle));
 diesel::joinable!(mid_answer -> puzzle (puzzle));
 diesel::joinable!(oracle -> puzzle (puzzle));
@@ -125,7 +117,6 @@ diesel::joinable!(transaction -> team (team));
 diesel::joinable!(unlock -> puzzle (puzzle));
 diesel::joinable!(unlock -> team (team));
 diesel::joinable!(users -> team (team));
-diesel::joinable!(vericode -> team (team_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     hint,
@@ -137,5 +128,4 @@ diesel::allow_tables_to_appear_in_same_query!(
     transaction,
     unlock,
     users,
-    vericode,
 );

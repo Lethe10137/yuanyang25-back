@@ -4,10 +4,10 @@ pub mod util;
 pub mod models;
 pub mod schema;
 
-use diesel::prelude::*;
-use diesel::r2d2::{self, ConnectionManager};
+use diesel_async::pooled_connection::bb8::Pool;
+use diesel_async::AsyncPgConnection;
 
-type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
+pub type DbPool = Pool<AsyncPgConnection>;
 
 pub const VERICODE_LENGTH: usize = 16;
 

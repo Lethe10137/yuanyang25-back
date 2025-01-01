@@ -2,13 +2,14 @@ use crate::schema::users;
 use crate::util::api_util::*;
 use crate::VERICODE_LENGTH;
 
+use diesel::prelude::*;
+use diesel_async::RunQueryDsl;
+
 use actix_web::{get, post, web, HttpResponse, Responder};
 use dotenv::dotenv;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::env;
-
-use diesel::prelude::*;
 
 use crate::models::User;
 use crate::util::cipher_util::DecodeTokenError;
@@ -104,7 +105,7 @@ fn set_loggedin_session(
 // Response Body: `RegisterResponse`
 //
 #[post("/register")]
-async fn register_user(
+pub async fn register_user(
     pool: web::Data<DbPool>,
     form: web::Json<RegisterRequest>,
     mut session: Session,
@@ -115,6 +116,7 @@ async fn register_user(
     form.sanity()?;
     let mut conn = pool
         .get()
+        .await
         .map_err(|e| log_server_error(e, location, ERROR_DB_CONNECTION))?;
 
     let response = match cipher_util::decode_token(form.token.as_str(), REGISTER_TOKEN.as_str()) {
@@ -140,6 +142,7 @@ async fn register_user(
                 ))
                 .returning(User::as_returning())
                 .get_result(&mut conn)
+                .await
                 .map_err(|e| log_server_error(e, location, ERROR_DB_UNKNOWN))?;
 
             session.clear();
@@ -148,7 +151,6 @@ async fn register_user(
         }
         Err(err) => RegisterResponse::Failed(err),
     };
-
     Ok(HttpResponse::Ok().json(response))
 }
 
@@ -169,6 +171,7 @@ async fn login_user(
     form.sanity()?;
     let mut conn = pool
         .get()
+        .await
         .map_err(|e| log_server_error(e, location, ERROR_DB_CONNECTION))?;
 
     let id = form.userid;
@@ -176,6 +179,7 @@ async fn login_user(
     let result: LoginResponse = if let Ok(user) = users::table
         .filter(users::id.eq(id))
         .get_result::<User>(&mut conn)
+        .await
     {
         match &form.auth {
             AuthMethod::Password(pw) => {

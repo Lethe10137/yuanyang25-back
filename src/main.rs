@@ -2,14 +2,17 @@ extern crate diesel;
 extern crate dotenv;
 
 use actix_web::{web, App, HttpServer};
-use diesel::prelude::*;
-use diesel::r2d2::{self, ConnectionManager};
+
+use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
+use diesel_async::AsyncPgConnection;
+use diesel_async::RunQueryDsl;
 
 use server::api::{register, team};
 use server::util::cipher_util;
 
 use actix_session::{storage::CookieSessionStore, SessionMiddleware};
 use log::warn;
+use server::DbPool;
 
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
@@ -19,10 +22,13 @@ async fn main() -> std::io::Result<()> {
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let cookie_token = std::env::var("COOKIE_TOKEN").expect("COOKIE_TOKEN must be set");
 
-    let manager = ConnectionManager::<PgConnection>::new(database_url);
-    let pool = r2d2::Pool::builder()
+    let manager = AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
+    let pool = Pool::builder()
         .build(manager)
-        .expect("Failed to create pool.");
+        .await
+        .expect("Failed to link to db");
+
+
 
     let secret_key = cipher_util::gen_cookie_key(&cookie_token);
 

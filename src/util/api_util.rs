@@ -4,16 +4,20 @@ use actix_web::{
     http::{header::ContentType, StatusCode},
     HttpResponse,
 };
+use chrono::{DateTime, Utc};
 use diesel::{pg::Pg, result::Error};
 
 use derive_more::derive::Display;
 use diesel::prelude::*;
 
 use crate::{
-    models::{Team, User},
+    models::{Puzzle, PuzzleId, Team, TeamId, User},
     Ext,
 };
 use log::{error, info};
+
+use diesel_async::AsyncPgConnection;
+use diesel_async::RunQueryDsl;
 
 pub trait APIRequest: Sized {
     fn ok(&self) -> bool;
@@ -30,6 +34,9 @@ pub trait APIRequest: Sized {
 pub enum APIError {
     #[display("Invalid form data")]
     InvalidFormData,
+
+    #[display("Invalid query")]
+    InvalidQuery,
 
     #[display("Invalid session")]
     InvalidSession,
@@ -127,26 +134,65 @@ pub fn user_privilege_check(session: &Session, require: i32) -> Result<(i32, i32
     }
 }
 
-pub fn fetch_user_from_id<M>(user_id: i32, conn: &mut M) -> Result<Option<User>, APIError>
-where
-    M: Connection<Backend = Pg> + diesel::connection::LoadConnection,
-{
+pub async fn fetch_user_from_id(
+    user_id: i32,
+    conn: &mut AsyncPgConnection,
+) -> Result<Option<User>, APIError> {
     use crate::schema::users::dsl::*;
-    match users.filter(id.eq(user_id)).first::<User>(conn) {
-        Ok(t) => Ok(Some(t)),
-        Err(diesel::result::Error::NotFound) => Ok(None),
+
+    match users.filter(id.eq(user_id)).first::<User>(conn).await {
+        Ok(user) => Ok(Some(user)),
+        Err(Error::NotFound) => Ok(None),
         Err(e) => Err(new_unlocated_server_error(e, ERROR_DB_UNKNOWN)),
     }
 }
 
-pub fn fetch_team_from_id<M>(team_id: i32, conn: &mut M) -> Result<Option<Team>, APIError>
-where
-    M: Connection<Backend = Pg> + diesel::connection::LoadConnection,
-{
+pub async fn fetch_team_from_id(
+    team_id: i32,
+    conn: &mut AsyncPgConnection,
+) -> Result<Option<Team>, APIError> {
     use crate::schema::team::dsl::*;
-    match team.filter(id.eq(team_id)).first::<Team>(conn) {
+
+    match team.filter(id.eq(team_id)).first::<Team>(conn).await {
         Ok(t) => Ok(Some(t)),
-        Err(diesel::result::Error::NotFound) => Ok(None),
+        Err(Error::NotFound) => Ok(None),
+        Err(e) => Err(new_unlocated_server_error(e, ERROR_DB_UNKNOWN)),
+    }
+}
+
+pub async fn fetch_puzzle_from_id(
+    puzzle_id: i32,
+    conn: &mut AsyncPgConnection,
+) -> Result<Puzzle, APIError> {
+    use crate::schema::puzzle::dsl::*;
+
+    match puzzle
+        .filter(id.eq(puzzle_id))
+        .select((bounty, title, answer, key))
+        .first::<Puzzle>(conn)
+        .await
+    {
+        Ok(p) => Ok(p),
+        Err(Error::NotFound) => Err(APIError::InvalidQuery),
+        Err(e) => Err(new_unlocated_server_error(e, ERROR_DB_UNKNOWN)),
+    }
+}
+
+pub async fn fetch_unlock_time(
+    puzzle_id: PuzzleId,
+    team_id: TeamId,
+    conn: &mut AsyncPgConnection,
+) -> Result<Option<DateTime<Utc>>, APIError> {
+    use crate::schema::unlock::dsl::*;
+
+    match unlock
+        .filter(team.eq(team_id).and(puzzle.eq(puzzle_id)))
+        .select(time)
+        .first::<DateTime<Utc>>(conn)
+        .await
+    {
+        Ok(t) => Ok(Some(t)),
+        Err(Error::NotFound) => Ok(None),
         Err(e) => Err(new_unlocated_server_error(e, ERROR_DB_UNKNOWN)),
     }
 }
