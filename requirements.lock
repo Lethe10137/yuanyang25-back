@@ -10,5 +10,15 @@
 #   universal: false
 
 -e file:.
+certifi==2024.12.14
+    # via requests
+charset-normalizer==3.4.1
+    # via requests
+idna==3.10
+    # via requests
 psycopg2==2.9.10
     # via back2025
+requests==2.32.3
+    # via back2025
+urllib3==2.3.0
+    # via requests

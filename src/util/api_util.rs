@@ -1,3 +1,5 @@
+use std::ops::DerefMut;
+
 use actix_session::Session;
 use actix_web::{
     error,
@@ -12,7 +14,7 @@ use diesel::prelude::*;
 
 use crate::{
     models::{Puzzle, PuzzleId, Team, TeamId, User},
-    Ext,
+    DbPool, Ext,
 };
 use log::{error, info};
 
@@ -30,7 +32,7 @@ pub trait APIRequest: Sized {
     }
 }
 
-#[derive(Debug, Display)]
+#[derive(Debug, Display, PartialEq, Eq)]
 pub enum APIError {
     #[display("Invalid form data")]
     InvalidFormData,
@@ -43,6 +45,9 @@ pub enum APIError {
 
     #[display("Not logged in")]
     NotLogin,
+
+    #[display("Not in a team")]
+    NotInTeam,
 
     #[display("Unauthorized access")]
     Unauthorized,
@@ -121,8 +126,8 @@ impl error::ResponseError for APIError {
 
 pub fn user_privilege_check(session: &Session, require: i32) -> Result<(i32, i32), APIError> {
     if let (Ok(Some(user_id)), Ok(Some(user_privilege))) = (
-        session.get::<i32>(crate::util::api_util::SESSION_USER_ID),
-        session.get::<i32>(crate::util::api_util::SESSION_PRIVILEGE),
+        session.get::<i32>(SESSION_USER_ID),
+        session.get::<i32>(SESSION_PRIVILEGE),
     ) {
         if user_privilege >= require {
             Ok((user_id, user_privilege))
@@ -134,10 +139,48 @@ pub fn user_privilege_check(session: &Session, require: i32) -> Result<(i32, i32
     }
 }
 
-pub async fn fetch_user_from_id(
-    user_id: i32,
-    conn: &mut AsyncPgConnection,
-) -> Result<Option<User>, APIError> {
+pub async fn get_team_id(
+    session: &mut Session,
+    pool: &DbPool,
+    location: &'static str,
+) -> Result<i32, APIError> {
+    if let Ok(Some(team_id)) = session.get::<i32>(SESSION_TEAM_ID) {
+        info!("team {} cached from session", team_id);
+        return Ok(team_id);
+    }
+    let (user_id, _) = user_privilege_check(session, PRIVILEGE_MINIMAL)?;
+
+    let mut conn = pool
+        .get()
+        .await
+        .map_err(|e| log_server_error(e, location, ERROR_DB_CONNECTION))?;
+
+    let user = fetch_user_from_id(user_id, &mut conn)
+        .await?
+        .ok_or(APIError::InvalidSession)
+        .inspect_err(kill_session(session))
+        .map_err(|e| e.set_location(location).tap(APIError::log))?;
+
+    if let Some(team_id) = user.team {
+        if check_confirmed_from_team_id(team_id, &mut conn)
+            .await?
+            .is_some_and(|confirmed| confirmed)
+        {
+            session.insert(SESSION_TEAM_ID, team_id).ok();
+            info!("user {} team {} cached in session", user_id, team_id);
+        } else {
+            info!("user {} team {} not confirmed", user_id, team_id);
+        }
+        Ok(team_id)
+    } else {
+        Err(APIError::NotInTeam)
+    }
+}
+
+pub async fn fetch_user_from_id<C>(user_id: i32, conn: &mut C) -> Result<Option<User>, APIError>
+where
+    C: DerefMut<Target = AsyncPgConnection> + std::marker::Send,
+{
     use crate::schema::users::dsl::*;
 
     match users.filter(id.eq(user_id)).first::<User>(conn).await {
@@ -147,10 +190,10 @@ pub async fn fetch_user_from_id(
     }
 }
 
-pub async fn fetch_team_from_id(
-    team_id: i32,
-    conn: &mut AsyncPgConnection,
-) -> Result<Option<Team>, APIError> {
+pub async fn fetch_team_from_id<C>(team_id: i32, conn: &mut C) -> Result<Option<Team>, APIError>
+where
+    C: DerefMut<Target = AsyncPgConnection> + std::marker::Send,
+{
     use crate::schema::team::dsl::*;
 
     match team.filter(id.eq(team_id)).first::<Team>(conn).await {
@@ -160,15 +203,36 @@ pub async fn fetch_team_from_id(
     }
 }
 
-pub async fn fetch_puzzle_from_id(
-    puzzle_id: i32,
-    conn: &mut AsyncPgConnection,
-) -> Result<Puzzle, APIError> {
+pub async fn check_confirmed_from_team_id<C>(
+    team_id: i32,
+    conn: &mut C,
+) -> Result<Option<bool>, APIError>
+where
+    C: DerefMut<Target = AsyncPgConnection> + std::marker::Send,
+{
+    use crate::schema::team::dsl::*;
+
+    match team
+        .filter(id.eq(team_id))
+        .select(confirmed)
+        .first::<bool>(conn)
+        .await
+    {
+        Ok(t) => Ok(Some(t)),
+        Err(Error::NotFound) => Ok(None),
+        Err(e) => Err(new_unlocated_server_error(e, ERROR_DB_UNKNOWN)),
+    }
+}
+
+pub async fn fetch_puzzle_from_id<C>(puzzle_id: i32, conn: &mut C) -> Result<Puzzle, APIError>
+where
+    C: DerefMut<Target = AsyncPgConnection> + std::marker::Send,
+{
     use crate::schema::puzzle::dsl::*;
 
     match puzzle
         .filter(id.eq(puzzle_id))
-        .select((bounty, title, answer, key))
+        .select((unlock, bounty, title, answer, key))
         .first::<Puzzle>(conn)
         .await
     {
@@ -178,11 +242,14 @@ pub async fn fetch_puzzle_from_id(
     }
 }
 
-pub async fn fetch_unlock_time(
+pub async fn fetch_unlock_time<C>(
     puzzle_id: PuzzleId,
     team_id: TeamId,
-    conn: &mut AsyncPgConnection,
-) -> Result<Option<DateTime<Utc>>, APIError> {
+    conn: &mut C,
+) -> Result<Option<DateTime<Utc>>, APIError>
+where
+    C: DerefMut<Target = AsyncPgConnection> + std::marker::Send,
+{
     use crate::schema::unlock::dsl::*;
 
     match unlock
@@ -195,6 +262,29 @@ pub async fn fetch_unlock_time(
         Err(Error::NotFound) => Ok(None),
         Err(e) => Err(new_unlocated_server_error(e, ERROR_DB_UNKNOWN)),
     }
+}
+
+pub async fn insert_or_update_unlock_time<C>(
+    puzzle_id: PuzzleId,
+    team_id: TeamId,
+    new_time: DateTime<Utc>,
+    conn: &mut C,
+) -> Result<(), APIError>
+where
+    C: DerefMut<Target = AsyncPgConnection> + std::marker::Send,
+{
+    use crate::schema::unlock::dsl::*;
+
+    diesel::insert_into(unlock)
+        .values((team.eq(team_id), puzzle.eq(puzzle_id), time.eq(new_time)))
+        .on_conflict((team, puzzle))
+        .do_update()
+        .set(time.eq(new_time))
+        .execute(conn)
+        .await
+        .map_err(|e| new_unlocated_server_error(e, ERROR_DB_UNKNOWN))?;
+
+    Ok(())
 }
 
 pub fn log_server_error<E>(error: E, location: &'static str, msg: &'static str) -> APIError
@@ -219,8 +309,26 @@ where
     }
 }
 
+pub fn handle_session<T>(session: &mut Session) -> impl FnMut((T, bool)) -> T + '_ {
+    |(value, kill_session)| {
+        if kill_session {
+            session.clear();
+        }
+        value
+    }
+}
+
+pub fn kill_session(session: &mut Session) -> impl FnMut(&APIError) + '_ {
+    |result| {
+        if result == &APIError::InvalidSession {
+            session.clear()
+        };
+    }
+}
+
 pub static SESSION_USER_ID: &str = "user_id";
 pub static SESSION_PRIVILEGE: &str = "user_privilege";
+pub static SESSION_TEAM_ID: &str = "team_id";
 
 pub static ERROR_DB_CONNECTION: &str = "db_connction_failed";
 pub static ERROR_SESSION_INSERT: &str = "session_setting_failed";

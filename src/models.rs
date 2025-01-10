@@ -42,6 +42,7 @@ pub struct Unlock {
 #[derive(Queryable, Selectable, Clone)]
 #[diesel(table_name = crate::schema::puzzle)]
 pub struct Puzzle {
+    pub unlock: i32,
     pub bounty: i32,
     pub title: String,
     pub answer: String,

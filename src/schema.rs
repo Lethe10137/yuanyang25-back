@@ -36,6 +36,7 @@ diesel::table! {
 diesel::table! {
     puzzle (id) {
         id -> Int4,
+        unlock -> Int4,
         bounty -> Int4,
         #[max_length = 64]
         title -> Varchar,

@@ -19,15 +19,6 @@ enum CreateTeamResponse {
     AlreadyInTeam { id: i32 },
 }
 
-fn handle_session<T>(session: &mut Session) -> impl FnMut((T, bool)) -> T + '_ {
-    |(value, kill_session)| {
-        if kill_session {
-            session.clear();
-        }
-        value
-    }
-}
-
 // [[API]]
 // desp: Create a team.
 // Method: GET
