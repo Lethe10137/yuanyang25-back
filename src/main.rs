@@ -6,7 +6,7 @@ use actix_web::{web, App, HttpServer};
 use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
 use diesel_async::AsyncPgConnection;
 
-use server::api::{register, team, puzzle};
+use server::api::{puzzle, register, team};
 use server::util::{cache::Cache, cipher_util};
 
 use actix_session::{storage::CookieSessionStore, SessionMiddleware};
@@ -56,6 +56,7 @@ async fn main() -> std::io::Result<()> {
             .service(team::join_team)
             .service(team::exit_team)
             .service(puzzle::decipher_key)
+            .service(puzzle::submit_answer)
     })
     .bind("0.0.0.0:9000")?
     .run()

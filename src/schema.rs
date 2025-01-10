@@ -79,6 +79,7 @@ diesel::table! {
         desp -> Varchar,
         amount -> Int8,
         balance -> Int8,
+        allowance -> Int8,
         time -> Timestamptz,
     }
 }

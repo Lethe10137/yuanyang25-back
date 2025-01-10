@@ -49,6 +49,9 @@ pub enum APIError {
     #[display("Not in a team")]
     NotInTeam,
 
+    #[display("Not in a team")]
+    InsufficientTokens,
+
     #[display("Unauthorized access")]
     Unauthorized,
 
@@ -93,13 +96,7 @@ impl APIError {
 
 impl From<Error> for APIError {
     fn from(e: Error) -> Self {
-        match e {
-            Error::AlreadyInTransaction => {
-                info!("Already in Transaction.");
-                APIError::TryAgain
-            }
-            e => new_unlocated_server_error(e, "Transaction"),
-        }
+        new_unlocated_server_error(e, "Transaction")
     }
 }
 
@@ -142,13 +139,14 @@ pub fn user_privilege_check(session: &Session, require: i32) -> Result<(i32, i32
 pub async fn get_team_id(
     session: &mut Session,
     pool: &DbPool,
+    privilege_needed: i32,
     location: &'static str,
 ) -> Result<i32, APIError> {
     if let Ok(Some(team_id)) = session.get::<i32>(SESSION_TEAM_ID) {
         info!("team {} cached from session", team_id);
         return Ok(team_id);
     }
-    let (user_id, _) = user_privilege_check(session, PRIVILEGE_MINIMAL)?;
+    let (user_id, _) = user_privilege_check(session, privilege_needed)?;
 
     let mut conn = pool
         .get()

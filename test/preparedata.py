@@ -1,3 +1,4 @@
+import hashlib
 import random
 import string
 import psycopg2
@@ -47,6 +48,7 @@ def insert_random_puzzle():
             VALUES (%s, %s, %s, %s, %s, %s)
         """)
 
+        result = []
 
         for _ in range(NUM_PUZZLES):
             
@@ -57,11 +59,13 @@ def insert_random_puzzle():
             key = generate_random_string(16)  # Random string of length 16
             content = generate_random_string(100)  # Random string of length 100
 
-            cursor.execute(query, (bounty, title, answer, key, content))
+            cursor.execute(query, (unlock, bounty, title, answer, key, content))
+            result.append((answer, key))
 
         # Commit the transaction
         conn.commit()
         print("%d rows successfully inserted into the 'puzzle' table.", NUM_PUZZLES)
+        return result
 
     except Exception as e:
         print("Error:", e)
@@ -70,6 +74,10 @@ def insert_random_puzzle():
             cursor.close()
         if conn:
             conn.close()
+            
+    return []
+            
+            
 
 
 
@@ -101,13 +109,21 @@ if __name__ == "__main__":
     subprocess.run(["diesel","migration","redo" ,"--all"])
     
     users = test_util.prepare_users(NUM_TEAMS * 3)
-    insert_random_puzzle()
+    puzzles = insert_random_puzzle()
     insert_unlock()
     
     s = test_util.login(users[0]["id"], users[0]["pw"])
   
+
+    res = s.post(
+        test_util.url + "/submit_answer", json= {
+            "puzzle_id" : 1,
+            "answer" : hashlib.sha256((puzzles[0][1] + puzzles[0][0]).encode()).hexdigest()
+        }
+    )
+    print(res.text, res)
+    
+
     for i in range(NUM_PUZZLES):
         res = s.get(test_util.url + "/decipher_key?puzzle_id={}".format(i))
         print(i, res.text, res)
-        
-    

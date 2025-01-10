@@ -196,3 +196,13 @@ pub fn verify_totp(identity: &str, veri_code: &str) -> bool {
             || totp(identity, time - 1).starts_with(veri_code)
             || totp(identity, time + 1).starts_with(veri_code))
 }
+
+pub fn check_answer(answer: &str, key: &str, submission: &str) -> bool {
+    let mut hasher = Sha256::new();
+    hasher.update(key);
+    hasher.update(answer);
+
+    let mut buffer = [0u8; 32];
+    hex::decode_to_slice(submission, &mut buffer)
+        .is_ok_and(|()| hasher.finalize().as_slice() == buffer)
+}

@@ -40,7 +40,11 @@ impl Cache {
             .map_err(|e| log_server_error(e, "cache", ERROR_DB_CONNECTION))
     }
 
-    async fn query_puzzle_cached<T, F>(&self, puzzle_id: PuzzleId, query: F) -> Result<T, APIError>
+    pub async fn query_puzzle_cached<T, F>(
+        &self,
+        puzzle_id: PuzzleId,
+        query: F,
+    ) -> Result<T, APIError>
     where
         F: FnOnce(&Puzzle) -> T,
         T: Sized,
