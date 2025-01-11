@@ -6,7 +6,7 @@ from psycopg2 import sql
 from psycopg2.extras import execute_values
 import test_util
 
-random.seed(4723)
+random.seed(4724)
 
 
 database_url = None
@@ -44,8 +44,8 @@ def insert_random_puzzle():
 
         # Prepare the INSERT query
         query = sql.SQL("""
-            INSERT INTO puzzle (unlock ,bounty, title, answer, key, content)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO puzzle (unlock ,bounty, title, answer, key, content, meta)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """)
         
@@ -59,13 +59,13 @@ def insert_random_puzzle():
         for i in range(NUM_PUZZLES):
             
             bounty = random.randint(100, 10000)  # Random integer for bounty
-            unlock = bounty // 3  # Random integer for bounty
+            unlock = i * 1000  
             title = generate_random_string(10)  # Random string of length 10
             answer = generate_random_string(10)  # Random string of length 10
             key = generate_random_string(16)  # Random string of length 16
             content = generate_random_string(100)  # Random string of length 100
 
-            cursor.execute(query, (unlock, bounty, title, answer, key, content))
+            cursor.execute(query, (unlock, bounty, title, answer, key, content, i == 0))
             
             inserted_id = cursor.fetchone()[0]
             
@@ -180,7 +180,13 @@ if __name__ == "__main__":
     )
     print(res.text, res)
     
-
+    print("decipher")
     for i in range(NUM_PUZZLES):
-        res = s.get(test_util.url + "/decipher_key?puzzle_id={}".format(i))
-        print(i, res.text, res)
+        res = s.get(test_util.url + "/decipher_key?puzzle_id={}".format(i+1))
+        print(i+1, res.text, res)
+        
+        
+    print("unlock")
+    for i in range(NUM_PUZZLES):
+        res = s.post(test_util.url + "/unlock?puzzle_id={}".format(i+1))
+        print(i+1, res.text, res)

@@ -206,7 +206,7 @@ async fn join_team(
                         } else if team.max_size <= team.size {
                             Ok((JoinTeamResponse::TeamFull, kill_session))
                         } else if team.is_staff && user_priv < PRIVILEGE_STAFF {
-                            info!("user priv {user_priv} too low");
+                            info!("user priv {user_priv} too low to join a staff team");
                             Ok((JoinTeamResponse::AuthError, kill_session))
                         } else if cipher_util::verify_totp(team.salt.as_str(), &form.vericode) {
                             // Update the user's team reference
@@ -225,7 +225,6 @@ async fn join_team(
 
                             Ok((JoinTeamResponse::Success { id: team_id }, kill_session))
                         } else {
-                            info!("veri {}", form.vericode);
                             Ok((JoinTeamResponse::AuthError, kill_session))
                         }
                     }

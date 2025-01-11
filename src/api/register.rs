@@ -16,7 +16,6 @@ use crate::util::cipher_util::DecodeTokenError;
 use crate::{schema, util::cipher_util, DbPool};
 
 use actix_session::Session;
-use log::info;
 
 use crate::util::api_util::{ERROR_DB_UNKNOWN, SESSION_PRIVILEGE, SESSION_USER_ID};
 
@@ -188,7 +187,6 @@ async fn login_user(
                 {
                     session.clear();
                     set_loggedin_session(&mut session, user.id, user.privilege, "login_password")?;
-                    info!("Setting cookie for user {}", user.id);
 
                     LoginResponse::Success(user.id)
                 } else {
@@ -199,7 +197,6 @@ async fn login_user(
                 if cipher_util::verify_totp(user.openid.as_str(), veri.as_str()) {
                     session.clear();
                     set_loggedin_session(&mut session, user.id, user.privilege, "login_totp")?;
-                    info!("Setting cookie for user {}", user.id);
                     LoginResponse::Success(id)
                 } else {
                     LoginResponse::Error

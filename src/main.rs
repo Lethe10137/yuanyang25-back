@@ -57,6 +57,7 @@ async fn main() -> std::io::Result<()> {
             .service(team::exit_team)
             .service(puzzle::decipher_key)
             .service(puzzle::submit_answer)
+            .service(puzzle::unlock)
     })
     .bind("0.0.0.0:9000")?
     .run()

@@ -45,6 +45,7 @@ diesel::table! {
 diesel::table! {
     puzzle (id) {
         id -> Int4,
+        meta -> Bool,
         unlock -> Int4,
         bounty -> Int4,
         #[max_length = 64]

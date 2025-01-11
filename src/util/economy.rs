@@ -135,6 +135,10 @@ pub fn puzzle_unlock_price(base_price: i32) -> i64 {
     (base_price * 2).into()
 }
 
+pub fn puzzle_hint_price(base_price: i32) -> i64 {
+    (base_price * 2).into()
+}
+
 pub fn time_allowance() -> i64 {
     (game_start_minutes() * 25.0) as i64
 }

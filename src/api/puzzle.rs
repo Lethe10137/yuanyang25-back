@@ -4,14 +4,16 @@ use crate::models::{Hint, MidAnswer, PuzzleBase};
 
 use crate::util::cache::Cache;
 use crate::util::cipher_util::prepare_hashed_answer;
-use crate::util::economy::{compulsory_team_balance, puzzle_reward, try_modify_team_balance};
+use crate::util::economy::{
+    compulsory_team_balance, puzzle_reward, puzzle_unlock_price, try_modify_team_balance,
+};
 use crate::util::{api_util::*, cipher_util::check_answer};
 
 use actix_web::{get, post, web, HttpResponse, Responder};
 
 use diesel::ExpressionMethods;
 use diesel_async::{AsyncConnection, RunQueryDsl};
-use log::info;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{DbPool, Ext};
@@ -67,18 +69,18 @@ impl Puzzle {
 use actix_session::Session;
 
 #[derive(Debug, Deserialize)]
-struct UnlockRequest {
+struct DecipherKeyRequest {
     puzzle_id: i32,
 }
 
-impl APIRequest for UnlockRequest {
+impl APIRequest for DecipherKeyRequest {
     fn ok(&self) -> bool {
         self.puzzle_id >= 0
     }
 }
 
 #[derive(Debug, Serialize)]
-enum UnlockResponse {
+enum DecipherKeyResponse {
     // returns the decipher key!.
     Success(String),
     NotAllowed,
@@ -88,13 +90,13 @@ enum UnlockResponse {
 // desp: Return the decipher_key of a puzzle
 // Method: GET
 // URL: /decipher_key
-// Request Body: `UnlockRequest`
-// Response Body: `UnlockResponse`
+// Request Body: `DecipherKeyRequest`
+// Response Body: `DecipherKeyResponse`
 #[get("/decipher_key")]
 async fn decipher_key(
     pool: web::Data<DbPool>,
     cache: web::Data<Cache>,
-    form: web::Query<UnlockRequest>,
+    form: web::Query<DecipherKeyRequest>,
     mut session: Session,
 ) -> Result<impl Responder, APIError> {
     let location = "decipher_key";
@@ -104,9 +106,9 @@ async fn decipher_key(
     let puzzle_id = form.puzzle_id;
 
     let result = if let Some(result) = cache.check_unlock_cached(team_id, puzzle_id).await? {
-        UnlockResponse::Success(result)
+        DecipherKeyResponse::Success(result)
     } else {
-        UnlockResponse::NotAllowed
+        DecipherKeyResponse::NotAllowed
     };
 
     Ok(HttpResponse::Ok().json(result))
@@ -127,8 +129,15 @@ impl APIRequest for SubmitAnswerRequest {
 #[derive(Debug, Serialize)]
 enum SubmitAmswerResponse {
     HasSubmitted,
-    Success { puzzle_id: i32, award_token: i64 },
+    Success {
+        puzzle_id: i32,
+        award_token: i64,
+    },
     TryAgainAfter(i64),
+    WrongAnswer {
+        penalty_token: i64,
+        try_again_after: i64,
+    },
     MidAnswerResponse(String),
 }
 
@@ -209,14 +218,13 @@ async fn submit_answer(
                             .execute(conn)
                             .await?;
 
-                        info!("mid_answer");
+                        
                         if submission_result == 1 {
                             //newly submitted mid answer
                             let old_penalty = fetch_wa_cnt(puzzle_id, team_id, conn).await?;
                             let new_penalty = old_penalty
                                 .map_or_else(WaPenalty::new, WaPenalty::on_new_mid_answer);
                             insert_or_update_wa_cnt(puzzle_id, team_id, new_penalty, conn).await?;
-                            info!("new_mid_answer");
                         }
 
                         Ok(SubmitAmswerResponse::MidAnswerResponse(response))
@@ -238,15 +246,106 @@ async fn submit_answer(
                         .map_err(Into::<APIError>::into)
                         .map_err(|e| e.set_location(location).tap(APIError::log))?;
 
-                        let result = SubmitAmswerResponse::TryAgainAfter(
-                            penalty.time_penalty_until.timestamp(),
-                        );
+                        let result = SubmitAmswerResponse::WrongAnswer {
+                            try_again_after: penalty.time_penalty_until.timestamp(),
+                            penalty_token: fine,
+                        };
 
                         insert_or_update_wa_cnt(puzzle_id, team_id, penalty, conn).await?;
 
                         Ok(result)
                     }
                 }
+            })
+        })
+        .await
+        .map_err(|e| e.set_location(location).tap(APIError::log))?;
+
+    Ok(HttpResponse::Ok().json(result))
+}
+
+#[derive(Debug, Deserialize)]
+struct UnlockRequest {
+    puzzle_id: i32,
+}
+
+impl APIRequest for UnlockRequest {
+    fn ok(&self) -> bool {
+        self.puzzle_id >= 0
+    }
+}
+
+#[derive(Debug, Serialize)]
+enum UnlockResponse {
+    Success { key: String, price: i64 },
+    AlreadyUnlocked(String),
+    NotAllowed,
+}
+
+// [[API]]
+// desp: Pay to unlock
+// Method: POST
+// URL: /unlock
+// Request Body: `UnlockRequest`
+// Response Body: `UnlockResponse`
+#[post("/unlock")]
+async fn unlock(
+    pool: web::Data<DbPool>,
+    cache: web::Data<Cache>,
+    form: web::Query<UnlockRequest>,
+    mut session: Session,
+) -> Result<impl Responder, APIError> {
+    let location = "unlock";
+
+    let team_id = get_team_id(&mut session, &pool, PRIVILEGE_MINIMAL, location).await?;
+
+    let puzzle_id = form.puzzle_id;
+
+    if let Some(result) = cache.check_unlock_cached(team_id, puzzle_id).await? {
+        return Ok(HttpResponse::Ok().json(UnlockResponse::AlreadyUnlocked(result)));
+    }
+
+    let (price, key, is_meta) = cache
+        .query_puzzle_cached(puzzle_id, |puzzle| {
+            (
+                puzzle_unlock_price(puzzle.base.unlock),
+                puzzle.base.key.clone(),
+                puzzle.base.meta,
+            )
+        })
+        .await
+        .map_err(|e| e.set_location(location).tap(APIError::log))?;
+
+    let mut conn = pool
+        .get()
+        .await
+        .map_err(|e| log_server_error(e, location, ERROR_DB_CONNECTION))?;
+
+    if is_meta && count_passed(team_id, &mut conn).await? < 6 {
+        return Ok(HttpResponse::Ok().json(UnlockResponse::NotAllowed));
+    }
+
+    let result = conn
+        .transaction::<_, APIError, _>(|conn| {
+            Box::pin(async move {
+                try_modify_team_balance(
+                    team_id,
+                    -price,
+                    format!("Unlocking puzzle {}", puzzle_id).as_str(),
+                    conn,
+                )
+                .await
+                .map_err(Into::<APIError>::into)
+                .map_err(|e| e.set_location(location).tap(APIError::log))?;
+
+                use crate::schema::unlock::dsl::*;
+
+                diesel::insert_into(unlock)
+                    .values((team.eq(team_id), puzzle.eq(puzzle_id)))
+                    .execute(conn)
+                    .await?;
+
+                Ok(UnlockResponse::Success { key, price })
             })
         })
         .await

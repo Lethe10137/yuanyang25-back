@@ -17,7 +17,7 @@ use crate::{
     models::{Hint, MidAnswer, PuzzleBase, PuzzleId, Team, TeamId, User},
     DbPool, Ext,
 };
-use log::{error, info};
+use log::error;
 
 use diesel_async::AsyncPgConnection;
 use diesel_async::RunQueryDsl;
@@ -50,7 +50,7 @@ pub enum APIError {
     #[display("Not in a team")]
     NotInTeam,
 
-    #[display("Not in a team")]
+    #[display("Insufficient Token")]
     InsufficientTokens,
 
     #[display("Unauthorized access")]
@@ -144,7 +144,6 @@ pub async fn get_team_id(
     location: &'static str,
 ) -> Result<i32, APIError> {
     if let Ok(Some(team_id)) = session.get::<i32>(SESSION_TEAM_ID) {
-        info!("team {} cached from session", team_id);
         return Ok(team_id);
     }
     let (user_id, _) = user_privilege_check(session, privilege_needed)?;
@@ -166,9 +165,6 @@ pub async fn get_team_id(
             .is_some_and(|confirmed| confirmed)
         {
             session.insert(SESSION_TEAM_ID, team_id).ok();
-            info!("user {} team {} cached in session", user_id, team_id);
-        } else {
-            info!("user {} team {} not confirmed", user_id, team_id);
         }
         Ok(team_id)
     } else {
@@ -234,6 +230,7 @@ where
     let puzzle_item = match puzzle_dsl::puzzle
         .filter(puzzle_dsl::id.eq(puzzle_id))
         .select((
+            puzzle_dsl::meta,
             puzzle_dsl::unlock,
             puzzle_dsl::bounty,
             puzzle_dsl::title,
@@ -372,6 +369,20 @@ where
         Err(Error::NotFound) => Ok(None),
         Err(e) => Err(new_unlocated_server_error(e, ERROR_DB_UNKNOWN)),
     }
+}
+
+pub async fn count_passed<C>(team_id: TeamId, conn: &mut C) -> Result<usize, APIError>
+where
+    C: DerefMut<Target = AsyncPgConnection> + std::marker::Send,
+{
+    use crate::schema::submission::dsl::*;
+
+    submission
+        .filter(team.eq(team_id))
+        .count()
+        .execute(conn)
+        .await
+        .map_err(|e| new_unlocated_server_error(e, ERROR_DB_UNKNOWN))
 }
 
 pub async fn insert_or_update_wa_cnt<C>(
