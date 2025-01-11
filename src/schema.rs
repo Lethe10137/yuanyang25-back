@@ -22,6 +22,15 @@ diesel::table! {
 }
 
 diesel::table! {
+    mid_answer_submission (id) {
+        id -> Int4,
+        team -> Int4,
+        mid_answer -> Int4,
+        time -> Timestamptz,
+    }
+}
+
+diesel::table! {
     oracle (id) {
         id -> Int4,
         puzzle -> Int4,
@@ -109,8 +118,21 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    wrong_answer_cnt (id) {
+        id -> Int4,
+        team -> Int4,
+        puzzle -> Int4,
+        token_punish_level -> Int4,
+        time_punish_level -> Int4,
+        time_punish_until -> Timestamptz,
+    }
+}
+
 diesel::joinable!(hint -> puzzle (puzzle));
 diesel::joinable!(mid_answer -> puzzle (puzzle));
+diesel::joinable!(mid_answer_submission -> mid_answer (mid_answer));
+diesel::joinable!(mid_answer_submission -> team (team));
 diesel::joinable!(oracle -> puzzle (puzzle));
 diesel::joinable!(oracle -> team (team));
 diesel::joinable!(submission -> puzzle (puzzle));
@@ -119,10 +141,13 @@ diesel::joinable!(transaction -> team (team));
 diesel::joinable!(unlock -> puzzle (puzzle));
 diesel::joinable!(unlock -> team (team));
 diesel::joinable!(users -> team (team));
+diesel::joinable!(wrong_answer_cnt -> puzzle (puzzle));
+diesel::joinable!(wrong_answer_cnt -> team (team));
 
 diesel::allow_tables_to_appear_in_same_query!(
     hint,
     mid_answer,
+    mid_answer_submission,
     oracle,
     puzzle,
     submission,
@@ -130,4 +155,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     transaction,
     unlock,
     users,
+    wrong_answer_cnt,
 );
