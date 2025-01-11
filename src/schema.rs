@@ -123,9 +123,9 @@ diesel::table! {
         id -> Int4,
         team -> Int4,
         puzzle -> Int4,
-        token_punish_level -> Int4,
-        time_punish_level -> Int4,
-        time_punish_until -> Timestamptz,
+        token_penalty_level -> Int4,
+        time_penalty_level -> Int4,
+        time_penalty_until -> Timestamptz,
     }
 }
 

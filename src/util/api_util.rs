@@ -6,14 +6,15 @@ use actix_web::{
     http::{header::ContentType, StatusCode},
     HttpResponse,
 };
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, TimeZone, Utc};
 use diesel::result::Error;
 
 use derive_more::derive::Display;
 use diesel::prelude::*;
 
 use crate::{
-    models::{Puzzle, PuzzleId, Team, TeamId, User},
+    api::puzzle::Puzzle,
+    models::{Hint, MidAnswer, PuzzleBase, PuzzleId, Team, TeamId, User},
     DbPool, Ext,
 };
 use log::{error, info};
@@ -226,18 +227,48 @@ pub async fn fetch_puzzle_from_id<C>(puzzle_id: i32, conn: &mut C) -> Result<Puz
 where
     C: DerefMut<Target = AsyncPgConnection> + std::marker::Send,
 {
-    use crate::schema::puzzle::dsl::*;
+    use crate::schema::hint::dsl as hint_dsl;
+    use crate::schema::mid_answer::dsl as mid_answer_dsl;
+    use crate::schema::puzzle::dsl as puzzle_dsl;
 
-    match puzzle
-        .filter(id.eq(puzzle_id))
-        .select((unlock, bounty, title, answer, key))
-        .first::<Puzzle>(conn)
+    let puzzle_item = match puzzle_dsl::puzzle
+        .filter(puzzle_dsl::id.eq(puzzle_id))
+        .select((
+            puzzle_dsl::unlock,
+            puzzle_dsl::bounty,
+            puzzle_dsl::title,
+            puzzle_dsl::answer,
+            puzzle_dsl::key,
+        ))
+        .first::<PuzzleBase>(conn)
         .await
     {
         Ok(p) => Ok(p),
         Err(Error::NotFound) => Err(APIError::InvalidQuery),
         Err(e) => Err(new_unlocated_server_error(e, ERROR_DB_UNKNOWN)),
-    }
+    }?;
+
+    let mid_answers = match mid_answer_dsl::mid_answer
+        .filter(mid_answer_dsl::puzzle.eq(puzzle_id))
+        .load::<MidAnswer>(conn)
+        .await
+    {
+        Ok(p) => Ok(p),
+        Err(Error::NotFound) => Err(APIError::InvalidQuery),
+        Err(e) => Err(new_unlocated_server_error(e, ERROR_DB_UNKNOWN)),
+    }?;
+
+    let hints = match hint_dsl::hint
+        .filter(hint_dsl::puzzle.eq(puzzle_id))
+        .load::<Hint>(conn)
+        .await
+    {
+        Ok(p) => Ok(p),
+        Err(Error::NotFound) => Err(APIError::InvalidQuery),
+        Err(e) => Err(new_unlocated_server_error(e, ERROR_DB_UNKNOWN)),
+    }?;
+
+    Ok(Puzzle::new(puzzle_item, hints, mid_answers))
 }
 
 pub async fn fetch_unlock_time<C>(
@@ -260,6 +291,119 @@ where
         Err(Error::NotFound) => Ok(None),
         Err(e) => Err(new_unlocated_server_error(e, ERROR_DB_UNKNOWN)),
     }
+}
+
+pub struct WaPenalty {
+    pub time_penalty_until: DateTime<Utc>,
+    pub token_penalty_level: i32,
+    pub time_penalty_level: i32,
+}
+
+static TIME_PENALTY: [i64; 10] = [10, 60, 120, 120, 120, 240, 480, 480, 480, 600]; // in seconds
+static TOKEN_PENALTY: [i64; 10] = [20, 20, 20, 20, 20, 20, 20, 100, 100, 200];
+
+impl Default for WaPenalty {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WaPenalty {
+    pub fn new() -> Self {
+        Self {
+            time_penalty_until: Utc.timestamp_opt(1, 0).unwrap(),
+            token_penalty_level: 0,
+            time_penalty_level: 0,
+        }
+    }
+
+    pub fn on_wrong_answer(&mut self) -> i64 {
+        let time_penalty = TIME_PENALTY
+            .get(self.time_penalty_level as usize)
+            .or(TIME_PENALTY.last())
+            .cloned()
+            .unwrap_or(600);
+        let token_penalty = TOKEN_PENALTY
+            .get(self.token_penalty_level as usize)
+            .or(TOKEN_PENALTY.last())
+            .cloned()
+            .unwrap_or(200);
+        self.token_penalty_level += 1;
+        self.time_penalty_level += 1;
+        self.time_penalty_until = Utc::now() + TimeDelta::seconds(time_penalty);
+        token_penalty
+    }
+
+    pub fn on_new_mid_answer(self) -> Self {
+        Self {
+            token_penalty_level: 0,
+            ..self
+        }
+    }
+}
+
+pub fn check_is_after(to_check: DateTime<Utc>, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    (now <= to_check).then_some(to_check)
+}
+
+pub async fn fetch_wa_cnt<C>(
+    puzzle_id: PuzzleId,
+    team_id: TeamId,
+    conn: &mut C,
+) -> Result<Option<WaPenalty>, APIError>
+where
+    C: DerefMut<Target = AsyncPgConnection> + std::marker::Send,
+{
+    use crate::schema::wrong_answer_cnt::dsl::*;
+
+    match wrong_answer_cnt
+        .filter(team.eq(team_id).and(puzzle.eq(puzzle_id)))
+        .select((time_penalty_until, token_penalty_level, time_penalty_level))
+        .first::<(DateTime<Utc>, i32, i32)>(conn)
+        .await
+    {
+        Ok((time_penalty_until_, token_penalty_level_, time_penalty_level_)) => {
+            Ok(Some(WaPenalty {
+                time_penalty_until: time_penalty_until_,
+                token_penalty_level: token_penalty_level_,
+                time_penalty_level: time_penalty_level_,
+            }))
+        }
+        Err(Error::NotFound) => Ok(None),
+        Err(e) => Err(new_unlocated_server_error(e, ERROR_DB_UNKNOWN)),
+    }
+}
+
+pub async fn insert_or_update_wa_cnt<C>(
+    puzzle_id: PuzzleId,
+    team_id: TeamId,
+    data: WaPenalty,
+    conn: &mut C,
+) -> Result<(), APIError>
+where
+    C: DerefMut<Target = AsyncPgConnection> + std::marker::Send,
+{
+    use crate::schema::wrong_answer_cnt::dsl::*;
+    diesel::insert_into(wrong_answer_cnt)
+        .values((
+            team.eq(team_id),
+            puzzle.eq(puzzle_id),
+            token_penalty_level.eq(data.token_penalty_level),
+            time_penalty_level.eq(data.time_penalty_level),
+            time_penalty_until.eq(data.time_penalty_until),
+        ))
+        .on_conflict((team, puzzle))
+        .do_update()
+        .set((
+            token_penalty_level.eq(data.token_penalty_level),
+            time_penalty_level.eq(data.time_penalty_level),
+            time_penalty_until.eq(data.time_penalty_until),
+        ))
+        .execute(conn)
+        .await
+        .map_err(|e| new_unlocated_server_error(e, ERROR_DB_UNKNOWN))?;
+
+    Ok(())
 }
 
 pub async fn insert_or_update_unlock_time<C>(

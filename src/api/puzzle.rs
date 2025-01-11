@@ -1,13 +1,68 @@
+use std::collections::HashMap;
+
+use crate::models::{Hint, MidAnswer, PuzzleBase};
+
 use crate::util::cache::Cache;
-use crate::util::economy::{puzzle_reward, try_modify_team_balance};
+use crate::util::cipher_util::prepare_hashed_answer;
+use crate::util::economy::{compulsory_team_balance, puzzle_reward, try_modify_team_balance};
 use crate::util::{api_util::*, cipher_util::check_answer};
 
 use actix_web::{get, post, web, HttpResponse, Responder};
+
 use diesel::ExpressionMethods;
 use diesel_async::{AsyncConnection, RunQueryDsl};
+use log::info;
 use serde::{Deserialize, Serialize};
 
 use crate::{DbPool, Ext};
+
+#[derive(Clone)]
+pub struct Puzzle {
+    pub base: PuzzleBase,
+    pub mid_answers: HashMap<String, MidAnswer>,
+    pub hints: HashMap<i32, Hint>,
+}
+
+pub enum CheckAnswerResult {
+    Accepted { reward_tokens: i64 },
+    AcceptedMidAnswer { mid_id: i32, response: String },
+    WrongAnswer,
+}
+
+impl Puzzle {
+    pub fn new(base: PuzzleBase, hints: Vec<Hint>, mid_answers: Vec<MidAnswer>) -> Self {
+        let mid_answers = mid_answers
+            .into_iter()
+            .map(|mid_ans| (prepare_hashed_answer(&mid_ans.query, &base.key), mid_ans))
+            .collect::<HashMap<String, MidAnswer>>();
+
+        let hints = hints
+            .into_iter()
+            .map(|hint| (hint.id, hint))
+            .collect::<HashMap<i32, Hint>>();
+
+        Self {
+            base,
+            mid_answers,
+            hints,
+        }
+    }
+
+    pub fn check(&self, submission: &str) -> CheckAnswerResult {
+        if check_answer(&self.base.answer, &self.base.key, submission) {
+            return CheckAnswerResult::Accepted {
+                reward_tokens: puzzle_reward(self.base.bounty),
+            };
+        }
+        if let Some(mid) = self.mid_answers.get(submission) {
+            return CheckAnswerResult::AcceptedMidAnswer {
+                mid_id: mid.id,
+                response: mid.response.clone(),
+            };
+        }
+        CheckAnswerResult::WrongAnswer
+    }
+}
 
 use actix_session::Session;
 
@@ -71,9 +126,10 @@ impl APIRequest for SubmitAnswerRequest {
 
 #[derive(Debug, Serialize)]
 enum SubmitAmswerResponse {
+    HasSubmitted,
     Success { puzzle_id: i32, award_token: i64 },
-    WrongAnswer,
-    Submitted,
+    TryAgainAfter(i64),
+    MidAnswerResponse(String),
 }
 
 // [[API]]
@@ -94,60 +150,107 @@ async fn submit_answer(
 
     let puzzle_id = form.puzzle_id;
 
+    if let Some(wa_penalty_until) = cache.check_no_submission_cached(team_id, puzzle_id).await? {
+        return Ok(HttpResponse::Ok().json(SubmitAmswerResponse::TryAgainAfter(
+            wa_penalty_until.timestamp(),
+        )));
+    }
+
     //Iff None, wrong answer!
-    let reward_tokens = cache
-        .query_puzzle_cached(puzzle_id, |puzzle| {
-            check_answer(&puzzle.answer, &puzzle.key, &form.answer)
-                .then(|| puzzle_reward(puzzle.bounty))
-        })
+    let check_result = cache
+        .query_puzzle_cached(puzzle_id, |puzzle| puzzle.check(&form.answer))
         .await?;
 
-    let result = if let Some(reward_tokens) = reward_tokens {
-        let mut conn = pool
-            .get()
-            .await
-            .map_err(|e| log_server_error(e, location, ERROR_DB_CONNECTION))?;
+    let mut conn = pool
+        .get()
+        .await
+        .map_err(|e| log_server_error(e, location, ERROR_DB_CONNECTION))?;
 
-        use crate::schema::submission::dsl::*;
-
-        conn.transaction::<_, APIError, _>(|conn| {
+    let result = conn
+        .transaction::<_, APIError, _>(|conn| {
             Box::pin(async move {
-                let submission_result = diesel::insert_into(submission)
-                    .values((
-                        team.eq(team_id),
-                        puzzle.eq(puzzle_id),
-                        reward.eq(reward_tokens),
-                    ))
-                    .on_conflict((team, puzzle))
-                    .do_nothing()
-                    .execute(conn)
-                    .await?;
+                match check_result {
+                    CheckAnswerResult::Accepted { reward_tokens } => {
+                        use crate::schema::submission::dsl::*;
+                        let submission_result = diesel::insert_into(submission)
+                            .values((
+                                team.eq(team_id),
+                                puzzle.eq(puzzle_id),
+                                reward.eq(reward_tokens),
+                            ))
+                            .on_conflict((team, puzzle))
+                            .do_nothing()
+                            .execute(conn)
+                            .await?;
+                        if submission_result == 0 {
+                            return Ok(SubmitAmswerResponse::HasSubmitted);
+                        } else {
+                            try_modify_team_balance(
+                                team_id,
+                                reward_tokens,
+                                format!("Reward for puzzle {}", puzzle_id).as_str(),
+                                conn,
+                            )
+                            .await
+                            .map_err(Into::<APIError>::into)
+                            .map_err(|e| e.set_location(location).tap(APIError::log))?;
+                        }
+                        Ok(SubmitAmswerResponse::Success {
+                            puzzle_id,
+                            award_token: reward_tokens,
+                        })
+                    }
+                    CheckAnswerResult::AcceptedMidAnswer { mid_id, response } => {
+                        use crate::schema::mid_answer_submission::dsl::*;
+                        let submission_result = diesel::insert_into(mid_answer_submission)
+                            .values((team.eq(team_id), mid_answer.eq(mid_id)))
+                            .on_conflict((team, mid_answer))
+                            .do_nothing()
+                            .execute(conn)
+                            .await?;
 
-                if submission_result == 0 {
-                    return Ok(SubmitAmswerResponse::Submitted);
-                } else {
-                    try_modify_team_balance(
-                        team_id,
-                        reward_tokens,
-                        format!("Reward for puzzle {}", puzzle_id).as_str(),
-                        conn,
-                    )
-                    .await
-                    .map_err(Into::<APIError>::into)
-                    .map_err(|e| e.set_location(location).tap(APIError::log))?;
+                        info!("mid_answer");
+                        if submission_result == 1 {
+                            //newly submitted mid answer
+                            let old_penalty = fetch_wa_cnt(puzzle_id, team_id, conn).await?;
+                            let new_penalty = old_penalty
+                                .map_or_else(WaPenalty::new, WaPenalty::on_new_mid_answer);
+                            insert_or_update_wa_cnt(puzzle_id, team_id, new_penalty, conn).await?;
+                            info!("new_mid_answer");
+                        }
+
+                        Ok(SubmitAmswerResponse::MidAnswerResponse(response))
+                    }
+                    CheckAnswerResult::WrongAnswer => {
+                        let mut penalty = fetch_wa_cnt(puzzle_id, team_id, conn)
+                            .await?
+                            .unwrap_or_else(WaPenalty::new);
+                        let fine = penalty.on_wrong_answer();
+                        assert!(fine >= 0);
+
+                        compulsory_team_balance(
+                            team_id,
+                            -fine,
+                            format!("Wrong answer penalty puzzle {}", puzzle_id).as_str(),
+                            conn,
+                        )
+                        .await
+                        .map_err(Into::<APIError>::into)
+                        .map_err(|e| e.set_location(location).tap(APIError::log))?;
+
+                        let result = SubmitAmswerResponse::TryAgainAfter(
+                            penalty.time_penalty_until.timestamp(),
+                        );
+
+                        insert_or_update_wa_cnt(puzzle_id, team_id, penalty, conn).await?;
+
+                        Ok(result)
+                    }
                 }
-
-                Ok(SubmitAmswerResponse::Success {
-                    puzzle_id,
-                    award_token: reward_tokens,
-                })
             })
         })
         .await
-        .map_err(|e| e.set_location(location).tap(APIError::log))?
-    } else {
-        SubmitAmswerResponse::WrongAnswer
-    };
+        .map_err(|e| e.set_location(location).tap(APIError::log))?;
 
     Ok(HttpResponse::Ok().json(result))
 }

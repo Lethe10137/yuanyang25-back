@@ -206,3 +206,10 @@ pub fn check_answer(answer: &str, key: &str, submission: &str) -> bool {
     hex::decode_to_slice(submission, &mut buffer)
         .is_ok_and(|()| hasher.finalize().as_slice() == buffer)
 }
+
+pub fn prepare_hashed_answer(answer: &str, key: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(key);
+    hasher.update(answer);
+    hex::encode(hasher.finalize().as_slice())
+}

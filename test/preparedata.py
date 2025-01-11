@@ -46,11 +46,17 @@ def insert_random_puzzle():
         query = sql.SQL("""
             INSERT INTO puzzle (unlock ,bounty, title, answer, key, content)
             VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """)
+        
+        query2 = sql.SQL("""
+            INSERT INTO mid_answer (puzzle, query, response)
+            VALUES (%s, %s, %s)
         """)
 
         result = []
 
-        for _ in range(NUM_PUZZLES):
+        for i in range(NUM_PUZZLES):
             
             bounty = random.randint(100, 10000)  # Random integer for bounty
             unlock = bounty // 3  # Random integer for bounty
@@ -60,7 +66,15 @@ def insert_random_puzzle():
             content = generate_random_string(100)  # Random string of length 100
 
             cursor.execute(query, (unlock, bounty, title, answer, key, content))
-            result.append((answer, key))
+            
+            inserted_id = cursor.fetchone()[0]
+            
+            mid1, mid2 = generate_random_string(10), generate_random_string(10)
+            
+            result.append((answer, key, mid1, mid2, inserted_id))
+            cursor.execute(query2, (inserted_id, mid1, generate_random_string(20)))
+            cursor.execute(query2, (inserted_id, mid2, generate_random_string(20)))
+            
 
         # Commit the transaction
         conn.commit()
@@ -82,7 +96,7 @@ def insert_random_puzzle():
 
 
 
-def insert_unlock():
+def insert_unlock(puzzles):
     # Connect to the database
     conn = psycopg2.connect(database_url)
     try:
@@ -92,7 +106,7 @@ def insert_unlock():
                 INSERT INTO "unlock" ("team", "puzzle") VALUES (%s, %s);
                 """)
                 for team in range(1, NUM_TEAMS+1):
-                    for puzzle in range(1, NUM_PUZZLES + 1):
+                    for puzzle in puzzles:
                         if random.random() < 0.3:
                             print(team, puzzle)
                             cursor.execute(query, (team, puzzle))
@@ -106,18 +120,61 @@ def insert_unlock():
 
 if __name__ == "__main__":
     import subprocess
+    import time
     subprocess.run(["diesel","migration","redo" ,"--all"])
     
     users = test_util.prepare_users(NUM_TEAMS * 3)
     puzzles = insert_random_puzzle()
-    insert_unlock()
+    
+    print(puzzles)
+    
+
+    insert_unlock([t[-1] for t in puzzles])
+    
+    
     
     s = test_util.login(users[0]["id"], users[0]["pw"])
-  
-
+    
+    puzzle_id = puzzles[0][-1]
+    
     res = s.post(
         test_util.url + "/submit_answer", json= {
-            "puzzle_id" : 1,
+            "puzzle_id" : puzzle_id,
+            "answer" : hashlib.sha256((puzzles[0][1] + puzzles[0][2]).encode()).hexdigest()
+        }
+    )
+    print(res.text, res)
+    
+    res = s.post(
+        test_util.url + "/submit_answer", json= {
+            "puzzle_id" : puzzle_id,
+            "answer" : hashlib.sha256((puzzles[0][1] + puzzles[0][2]).encode()).hexdigest()
+        }
+    )
+    print(res.text, res)
+    
+    res = s.post(
+        test_util.url + "/submit_answer", json= {
+            "puzzle_id" : puzzle_id,
+            "answer" : hashlib.sha256((puzzles[0][1] + puzzles[0][3]).encode()).hexdigest()
+        }
+    )
+    print(res.text, res)
+  
+
+    for i in range(10):
+        res = s.post(
+            test_util.url + "/submit_answer", json= {
+                "puzzle_id" : puzzle_id,
+                "answer" : hashlib.sha256((puzzles[0][0]).encode()).hexdigest()
+            }
+        )
+        print(res.text, res)
+        time.sleep(1)
+    
+    res = s.post(
+        test_util.url + "/submit_answer", json= {
+            "puzzle_id" : puzzle_id,
             "answer" : hashlib.sha256((puzzles[0][1] + puzzles[0][0]).encode()).hexdigest()
         }
     )

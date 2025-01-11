@@ -1,3 +1,3 @@
 #!/bin/bash
-diesel migration redo --all
+diesel migration run
 RUST_LOG=INFO MODE=dev cargo run
