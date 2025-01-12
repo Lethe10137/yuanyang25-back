@@ -62,9 +62,6 @@ pub enum APIError {
         msg: &'static str,
         refnum: uuid::Uuid,
     },
-
-    #[display("Try again later")]
-    TryAgain,
 }
 
 impl APIError {
@@ -116,7 +113,6 @@ impl error::ResponseError for APIError {
                 msg: _,
                 refnum: _,
             } => StatusCode::INTERNAL_SERVER_ERROR,
-            APIError::TryAgain => StatusCode::TOO_MANY_REQUESTS,
             _ => StatusCode::BAD_REQUEST,
         }
     }

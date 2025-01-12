@@ -132,11 +132,13 @@ enum SubmitAmswerResponse {
     Success {
         puzzle_id: i32,
         award_token: i64,
+        new_balance: i64,
     },
     TryAgainAfter(i64),
     WrongAnswer {
         penalty_token: i64,
         try_again_after: i64,
+        new_balance: i64,
     },
     MidAnswerResponse(String),
 }
@@ -193,20 +195,21 @@ async fn submit_answer(
                             .await?;
                         if submission_result == 0 {
                             return Ok(SubmitAmswerResponse::HasSubmitted);
-                        } else {
-                            try_modify_team_balance(
-                                team_id,
-                                reward_tokens,
-                                format!("Reward for puzzle {}", puzzle_id).as_str(),
-                                conn,
-                            )
-                            .await
-                            .map_err(Into::<APIError>::into)
-                            .map_err(|e| e.set_location(location).tap(APIError::log))?;
                         }
+                        let new_balance = try_modify_team_balance(
+                            team_id,
+                            reward_tokens,
+                            format!("Reward for puzzle {}", puzzle_id).as_str(),
+                            conn,
+                        )
+                        .await
+                        .map_err(Into::<APIError>::into)
+                        .map_err(|e| e.set_location(location).tap(APIError::log))?;
+
                         Ok(SubmitAmswerResponse::Success {
                             puzzle_id,
                             award_token: reward_tokens,
+                            new_balance,
                         })
                     }
                     CheckAnswerResult::AcceptedMidAnswer { mid_id, response } => {
@@ -218,7 +221,6 @@ async fn submit_answer(
                             .execute(conn)
                             .await?;
 
-                        
                         if submission_result == 1 {
                             //newly submitted mid answer
                             let old_penalty = fetch_wa_cnt(puzzle_id, team_id, conn).await?;
@@ -236,7 +238,7 @@ async fn submit_answer(
                         let fine = penalty.on_wrong_answer();
                         assert!(fine >= 0);
 
-                        compulsory_team_balance(
+                        let new_balance = compulsory_team_balance(
                             team_id,
                             -fine,
                             format!("Wrong answer penalty puzzle {}", puzzle_id).as_str(),
@@ -249,6 +251,7 @@ async fn submit_answer(
                         let result = SubmitAmswerResponse::WrongAnswer {
                             try_again_after: penalty.time_penalty_until.timestamp(),
                             penalty_token: fine,
+                            new_balance,
                         };
 
                         insert_or_update_wa_cnt(puzzle_id, team_id, penalty, conn).await?;
@@ -277,7 +280,11 @@ impl APIRequest for UnlockRequest {
 
 #[derive(Debug, Serialize)]
 enum UnlockResponse {
-    Success { key: String, price: i64 },
+    Success {
+        key: String,
+        price: i64,
+        new_balance: i64,
+    },
     AlreadyUnlocked(String),
     NotAllowed,
 }
@@ -328,7 +335,7 @@ async fn unlock(
     let result = conn
         .transaction::<_, APIError, _>(|conn| {
             Box::pin(async move {
-                try_modify_team_balance(
+                let new_balance = try_modify_team_balance(
                     team_id,
                     -price,
                     format!("Unlocking puzzle {}", puzzle_id).as_str(),
@@ -345,7 +352,11 @@ async fn unlock(
                     .execute(conn)
                     .await?;
 
-                Ok(UnlockResponse::Success { key, price })
+                Ok(UnlockResponse::Success {
+                    key,
+                    price,
+                    new_balance,
+                })
             })
         })
         .await

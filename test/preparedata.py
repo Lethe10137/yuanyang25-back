@@ -172,6 +172,16 @@ if __name__ == "__main__":
         print(res.text, res)
         time.sleep(1)
     
+    #首次提交正确答案
+    res = s.post(
+        test_util.url + "/submit_answer", json= {
+            "puzzle_id" : puzzle_id,
+            "answer" : hashlib.sha256((puzzles[0][1] + puzzles[0][0]).encode()).hexdigest()
+        }
+    )
+    print(res.text, res)
+    
+    #重复提交正确答案
     res = s.post(
         test_util.url + "/submit_answer", json= {
             "puzzle_id" : puzzle_id,
