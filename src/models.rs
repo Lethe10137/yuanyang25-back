@@ -3,6 +3,7 @@ use diesel::prelude::*;
 
 pub type TeamId = i32;
 pub type PuzzleId = i32;
+pub type DecipherId = i32;
 pub type UserId = i32;
 
 #[derive(Queryable, Selectable, Clone)]
@@ -29,42 +30,37 @@ pub struct Team {
     pub salt: String,
 }
 
-//TODO: 检查(team, puzzle)是不是有索引
-
 #[derive(Queryable, Selectable, Clone)]
 #[diesel(table_name = crate::schema::unlock)]
 pub struct Unlock {
-    pub time: DateTime<Utc>,
+    pub level: i32,
     pub team: TeamId,
-    pub puzzle: PuzzleId,
+    pub decipher: DecipherId,
 }
 
 #[derive(Queryable, Selectable, Clone)]
 #[diesel(table_name = crate::schema::puzzle)]
 pub struct PuzzleBase {
     pub meta: bool,
-    pub unlock: i32,
     pub bounty: i32,
     pub title: String,
-    pub answer: String,
-    pub key: String,
+    pub decipher: i32,
+    pub depth: i32,
 }
 
 #[derive(Queryable, Selectable, Clone)]
-#[diesel(table_name = crate::schema::mid_answer)]
-pub struct MidAnswer {
-    pub id: i32,
-    pub puzzle: i32,
-    pub query: String,
-    pub response: String,
+#[diesel(table_name = crate::schema::wrong_answer_cnt)]
+pub struct WaPenalty {
+    pub time_penalty_until: DateTime<Utc>,
+    pub token_penalty_level: i32,
+    pub time_penalty_level: i32,
 }
 
 #[derive(Queryable, Selectable, Clone)]
-#[diesel(table_name = crate::schema::hint)]
-pub struct Hint {
-    pub id: i32,
-    pub title: String,
-    pub base_price: i64,
-    pub puzzle: i32,
-    pub content: String,
+#[diesel(table_name = crate::schema::decipher)]
+pub struct Decipher {
+    pub pricing_type: i32,
+    pub base_price: i32,
+    pub depth: i32,
+    pub root: String,
 }

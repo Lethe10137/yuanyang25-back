@@ -151,7 +151,7 @@ pub fn check_salted_password<'a>(
 
 use actix_web::cookie::Key;
 
-use crate::models::User;
+use crate::models::{Decipher, User};
 
 pub fn gen_cookie_key(cookie_token: &str) -> Key {
     let mut hasher = Sha512::new();
@@ -212,4 +212,34 @@ pub fn prepare_hashed_answer(answer: &str, key: &str) -> String {
     hasher.update(key);
     hasher.update(answer);
     hex::encode(hasher.finalize().as_slice())
+}
+
+///
+/// ``` rust
+/// use server::util::cipher_util::cipher_chain;
+///
+/// // echo bbf7c84ee9324133055b5eb077c51a2e07aed5bdd6601cd7bdbc7c551fa09dfb | xxd -r -p | sha256sum
+/// let start = "bbf7c84ee9324133055b5eb077c51a2e07aed5bdd6601cd7bdbc7c551fa09dfb";
+/// assert_eq!(cipher_chain(start, 0).as_str(), start);
+/// assert_eq!(cipher_chain(start, 1).as_str(), "1e49dc49d80abd08de65d6cb62827ec5a97495a9d2467d648e133c28438aca36");
+/// assert_eq!(cipher_chain(start, 2).as_str(), "aaede6b8258494cd2a2d519060f70f222855bde04977bda4518decf400635e6c");
+/// assert_eq!(cipher_chain(start, 3).as_str(), "02b23e558e5a938335cd46cf53507fa2d42024355a69d46eccf6a69237eab1d5");
+///
+/// ```
+pub fn cipher_chain(root: &str, depth: usize) -> String {
+    let mut root = hex::decode(root).unwrap();
+
+    for _ in 0..depth {
+        let mut hasher = Sha256::new();
+        hasher.update(root.as_slice());
+        hasher.finalize_into(root.as_mut_slice().into());
+    }
+
+    hex::encode(root.as_slice())
+}
+
+impl Decipher {
+    pub fn get_key(&self, level: i32) -> String {
+        cipher_chain(self.root.as_str(), level.max(0) as usize)
+    }
 }

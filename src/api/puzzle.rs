@@ -1,16 +1,19 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use crate::models::{Hint, MidAnswer, PuzzleBase};
+use crate::models::{PuzzleBase, WaPenalty};
 
+use crate::util::api_util::*;
+use crate::util::auto_fetch::Expiration;
 use crate::util::cache::Cache;
-use crate::util::cipher_util::prepare_hashed_answer;
+use crate::util::cipher_util::cipher_chain;
 use crate::util::economy::{
-    compulsory_team_balance, puzzle_reward, puzzle_unlock_price, try_modify_team_balance,
+    compulsory_team_balance, deciper_price, puzzle_reward, try_modify_team_balance,
 };
-use crate::util::{api_util::*, cipher_util::check_answer};
 
 use actix_web::{get, post, web, HttpResponse, Responder};
 
+use chrono::Utc;
 use diesel::ExpressionMethods;
 use diesel_async::{AsyncConnection, RunQueryDsl};
 
@@ -21,48 +24,39 @@ use crate::{DbPool, Ext};
 #[derive(Clone)]
 pub struct Puzzle {
     pub base: PuzzleBase,
-    pub mid_answers: HashMap<String, MidAnswer>,
-    pub hints: HashMap<i32, Hint>,
+    pub answers: HashMap<String, i32>,
 }
 
 pub enum CheckAnswerResult {
-    Accepted { reward_tokens: i64 },
-    AcceptedMidAnswer { mid_id: i32, response: String },
+    Accepted {
+        reward_tokens: i64,
+        level: i32,
+        total: i32,
+    },
     WrongAnswer,
 }
 
 impl Puzzle {
-    pub fn new(base: PuzzleBase, hints: Vec<Hint>, mid_answers: Vec<MidAnswer>) -> Self {
-        let mid_answers = mid_answers
-            .into_iter()
-            .map(|mid_ans| (prepare_hashed_answer(&mid_ans.query, &base.key), mid_ans))
-            .collect::<HashMap<String, MidAnswer>>();
-
-        let hints = hints
-            .into_iter()
-            .map(|hint| (hint.id, hint))
-            .collect::<HashMap<i32, Hint>>();
-
+    pub fn new(base: PuzzleBase, answers: Vec<(String, i32)>) -> Self {
         Self {
             base,
-            mid_answers,
-            hints,
+            answers: answers.into_iter().collect(),
         }
     }
-
     pub fn check(&self, submission: &str) -> CheckAnswerResult {
-        if check_answer(&self.base.answer, &self.base.key, submission) {
-            return CheckAnswerResult::Accepted {
+        match self.answers.get(submission).cloned() {
+            Some(0) => CheckAnswerResult::Accepted {
                 reward_tokens: puzzle_reward(self.base.bounty),
-            };
+                level: 0,
+                total: self.base.depth,
+            },
+            Some(level) => CheckAnswerResult::Accepted {
+                reward_tokens: 0,
+                level,
+                total: self.base.depth,
+            },
+            _ => CheckAnswerResult::WrongAnswer,
         }
-        if let Some(mid) = self.mid_answers.get(submission) {
-            return CheckAnswerResult::AcceptedMidAnswer {
-                mid_id: mid.id,
-                response: mid.response.clone(),
-            };
-        }
-        CheckAnswerResult::WrongAnswer
     }
 }
 
@@ -70,12 +64,12 @@ use actix_session::Session;
 
 #[derive(Debug, Deserialize)]
 struct DecipherKeyRequest {
-    puzzle_id: i32,
+    decipher_id: i32,
 }
 
 impl APIRequest for DecipherKeyRequest {
     fn ok(&self) -> bool {
-        self.puzzle_id >= 0
+        self.decipher_id >= 0
     }
 }
 
@@ -83,7 +77,7 @@ impl APIRequest for DecipherKeyRequest {
 enum DecipherKeyResponse {
     // returns the decipher key!.
     Success(String),
-    NotAllowed,
+    Price(i64),
 }
 
 // [[API]]
@@ -94,7 +88,7 @@ enum DecipherKeyResponse {
 // Response Body: `DecipherKeyResponse`
 #[get("/decipher_key")]
 async fn decipher_key(
-    pool: web::Data<DbPool>,
+    pool: web::Data<Arc<DbPool>>,
     cache: web::Data<Cache>,
     form: web::Query<DecipherKeyRequest>,
     mut session: Session,
@@ -103,13 +97,114 @@ async fn decipher_key(
 
     let team_id = get_team_id(&mut session, &pool, PRIVILEGE_MINIMAL, location).await?;
 
-    let puzzle_id = form.puzzle_id;
+    let decipher_id = form.decipher_id;
+    let answer = cache.decipher_cache.get(decipher_id).await?;
 
-    let result = if let Some(result) = cache.check_unlock_cached(team_id, puzzle_id).await? {
-        DecipherKeyResponse::Success(result)
+    let result = if let Some(level) = cache.unlock_cache.get((team_id, decipher_id)).await? {
+        DecipherKeyResponse::Success(answer.get_key(level))
     } else {
-        DecipherKeyResponse::NotAllowed
+        DecipherKeyResponse::Price(deciper_price(answer.pricing_type, answer.base_price))
     };
+
+    Ok(HttpResponse::Ok().json(result))
+}
+
+#[derive(Debug, Deserialize)]
+struct UnlockRequest {
+    decipher_id: i32,
+}
+
+impl APIRequest for UnlockRequest {
+    fn ok(&self) -> bool {
+        self.decipher_id >= 0
+    }
+}
+
+#[derive(Debug, Serialize)]
+enum UnlockResponse {
+    Success {
+        key: String,
+        price: i64,
+        new_balance: i64,
+    },
+    AlreadyUnlocked(String),
+}
+
+// [[API]]
+// desp: Pay to unlock
+// Method: POST
+// URL: /unlock
+// Request Body: `UnlockRequest`
+// Response Body: `UnlockResponse`
+#[post("/unlock")]
+async fn unlock(
+    pool: web::Data<Arc<DbPool>>,
+    cache: web::Data<Cache>,
+    form: web::Query<UnlockRequest>,
+    mut session: Session,
+) -> Result<impl Responder, APIError> {
+    let location = "unlock";
+
+    let team_id = get_team_id(&mut session, &pool, PRIVILEGE_MINIMAL, location).await?;
+
+    let decipher_id = form.decipher_id;
+    let answer = cache.decipher_cache.get(decipher_id).await?;
+
+    if let Some(level) = cache.unlock_cache.get((team_id, decipher_id)).await? {
+        return Ok(HttpResponse::Ok().json(UnlockResponse::AlreadyUnlocked(answer.get_key(level))));
+    }
+
+    let price = deciper_price(answer.pricing_type, answer.base_price);
+    let level = (answer.depth - 1).max(0);
+    let key = cipher_chain(&answer.root, level as usize);
+
+    let mut conn = pool
+        .get()
+        .await
+        .map_err(|e| log_server_error(e, location, ERROR_DB_CONNECTION))?;
+
+    let result = conn
+        .transaction::<_, APIError, _>(|conn| {
+            Box::pin(async move {
+                let new_balance = try_modify_team_balance(
+                    team_id,
+                    -price,
+                    format!("Purchasing decipher_key {}", decipher_id).as_str(),
+                    conn,
+                    Some(decipher_id),
+                )
+                .await
+                .map_err(Into::<APIError>::into)
+                .map_err(|e| e.set_location(location).tap(APIError::log));
+
+                match new_balance {
+                    Ok(new_balance) => Ok(UnlockResponse::Success {
+                        key,
+                        price,
+                        new_balance,
+                    }),
+                    Err(APIError::TransactionCancel { .. }) => {
+                        Ok(UnlockResponse::AlreadyUnlocked(key))
+                    }
+                    Err(e) => Err(e),
+                }
+            })
+        })
+        .await
+        .map_err(|e| e.set_location(location).tap(APIError::log))?;
+
+    cache
+        .unlock_cache
+        .set(
+            (team_id, decipher_id),
+            Some(level),
+            if level == 0 {
+                Expiration::Long
+            } else {
+                Expiration::Short
+            },
+        )
+        .await?;
 
     Ok(HttpResponse::Ok().json(result))
 }
@@ -133,6 +228,7 @@ enum SubmitAmswerResponse {
         puzzle_id: i32,
         award_token: i64,
         new_balance: i64,
+        key: String,
     },
     TryAgainAfter(i64),
     WrongAnswer {
@@ -140,7 +236,6 @@ enum SubmitAmswerResponse {
         try_again_after: i64,
         new_balance: i64,
     },
-    MidAnswerResponse(String),
 }
 
 // [[API]]
@@ -151,7 +246,7 @@ enum SubmitAmswerResponse {
 // Response Body: `SubmitAnswerResponse`
 #[post("/submit_answer")]
 async fn submit_answer(
-    pool: web::Data<DbPool>,
+    pool: web::Data<Arc<DbPool>>,
     cache: web::Data<Cache>,
     form: web::Json<SubmitAnswerRequest>,
     mut session: Session,
@@ -161,16 +256,23 @@ async fn submit_answer(
 
     let puzzle_id = form.puzzle_id;
 
-    if let Some(wa_penalty_until) = cache.check_no_submission_cached(team_id, puzzle_id).await? {
+    if let Some(wa_penalty_until) = cache.query_wa_penalty(team_id, puzzle_id).await? {
         return Ok(HttpResponse::Ok().json(SubmitAmswerResponse::TryAgainAfter(
             wa_penalty_until.timestamp(),
         )));
     }
 
-    //Iff None, wrong answer!
-    let check_result = cache
-        .query_puzzle_cached(puzzle_id, |puzzle| puzzle.check(&form.answer))
+    let (check_result, decipher_id) = cache
+        .query_puzzle_cached(puzzle_id, |puzzle: &Puzzle| {
+            (puzzle.check(&form.answer), puzzle.base.decipher)
+        })
         .await?;
+
+    let old_level = if let Some(level) = cache.unlock_cache.get((team_id, decipher_id)).await? {
+        level
+    } else {
+        return Err(APIError::InvalidQuery);
+    };
 
     let mut conn = pool
         .get()
@@ -181,56 +283,73 @@ async fn submit_answer(
         .transaction::<_, APIError, _>(|conn| {
             Box::pin(async move {
                 match check_result {
-                    CheckAnswerResult::Accepted { reward_tokens } => {
+                    CheckAnswerResult::Accepted {
+                        reward_tokens,
+                        level,
+                        total,
+                    } => {
                         use crate::schema::submission::dsl::*;
                         let submission_result = diesel::insert_into(submission)
                             .values((
                                 team.eq(team_id),
                                 puzzle.eq(puzzle_id),
+                                depth.eq(level),
                                 reward.eq(reward_tokens),
                             ))
-                            .on_conflict((team, puzzle))
+                            .on_conflict((team, puzzle, depth))
                             .do_nothing()
                             .execute(conn)
                             .await?;
                         if submission_result == 0 {
                             return Ok(SubmitAmswerResponse::HasSubmitted);
                         }
-                        let new_balance = try_modify_team_balance(
+
+                        let new_balance = compulsory_team_balance(
                             team_id,
                             reward_tokens,
-                            format!("Reward for puzzle {}", puzzle_id).as_str(),
+                            format!(
+                                "Reward for puzzle {}, {} / {}",
+                                puzzle_id,
+                                total - level,
+                                total
+                            )
+                            .as_str(),
                             conn,
                         )
                         .await
                         .map_err(Into::<APIError>::into)
                         .map_err(|e| e.set_location(location).tap(APIError::log))?;
 
-                        Ok(SubmitAmswerResponse::Success {
-                            puzzle_id,
-                            award_token: reward_tokens,
-                            new_balance,
-                        })
-                    }
-                    CheckAnswerResult::AcceptedMidAnswer { mid_id, response } => {
-                        use crate::schema::mid_answer_submission::dsl::*;
-                        let submission_result = diesel::insert_into(mid_answer_submission)
-                            .values((team.eq(team_id), mid_answer.eq(mid_id)))
-                            .on_conflict((team, mid_answer))
-                            .do_nothing()
-                            .execute(conn)
-                            .await?;
-
-                        if submission_result == 1 {
-                            //newly submitted mid answer
+                        if level < old_level {
                             let old_penalty = fetch_wa_cnt(puzzle_id, team_id, conn).await?;
                             let new_penalty = old_penalty
                                 .map_or_else(WaPenalty::new, WaPenalty::on_new_mid_answer);
                             insert_or_update_wa_cnt(puzzle_id, team_id, new_penalty, conn).await?;
                         }
 
-                        Ok(SubmitAmswerResponse::MidAnswerResponse(response))
+                        let level = level.min(old_level);
+                        cache
+                            .unlock_cache
+                            .set(
+                                (team_id, decipher_id),
+                                Some(level),
+                                if level == 0 {
+                                    Expiration::Long
+                                } else {
+                                    Expiration::Short
+                                },
+                            )
+                            .await?;
+                        let answer = cache.decipher_cache.get(decipher_id).await?;
+
+                        Ok(SubmitAmswerResponse::Success {
+                            puzzle_id,
+                            award_token: reward_tokens,
+                            new_balance,
+                            key: answer.get_key(level),
+                        })
                     }
+
                     CheckAnswerResult::WrongAnswer => {
                         let mut penalty = fetch_wa_cnt(puzzle_id, team_id, conn)
                             .await?
@@ -267,100 +386,50 @@ async fn submit_answer(
     Ok(HttpResponse::Ok().json(result))
 }
 
-#[derive(Debug, Deserialize)]
-struct UnlockRequest {
-    puzzle_id: i32,
-}
-
-impl APIRequest for UnlockRequest {
-    fn ok(&self) -> bool {
-        self.puzzle_id >= 0
-    }
+#[derive(Debug, Serialize)]
+pub enum PuzzleStatus {
+    Passed,
+    Unlocked,
+    Locked,
 }
 
 #[derive(Debug, Serialize)]
-enum UnlockResponse {
-    Success {
-        key: String,
-        price: i64,
-        new_balance: i64,
-    },
-    AlreadyUnlocked(String),
-    NotAllowed,
+pub struct PuzzleStatusItem {
+    puzzle_id: i32,
+    passed: usize,
+    unlocked: usize,
+    your_status: Option<PuzzleStatus>,
 }
 
-// [[API]]
-// desp: Pay to unlock
-// Method: POST
-// URL: /unlock
-// Request Body: `UnlockRequest`
-// Response Body: `UnlockResponse`
-#[post("/unlock")]
-async fn unlock(
-    pool: web::Data<DbPool>,
+#[derive(Debug, Serialize)]
+struct PuzzleStatusResponse {
+    updated: i64, // unix timestamp in seconds
+    data: Vec<PuzzleStatusItem>,
+}
+
+#[get("/puzzle_status")]
+async fn puzzle_status(
+    pool: web::Data<Arc<DbPool>>,
     cache: web::Data<Cache>,
-    form: web::Query<UnlockRequest>,
     mut session: Session,
 ) -> Result<impl Responder, APIError> {
-    let location = "unlock";
+    let location = "puzzle_status";
+    let team = allow_err(
+        get_team_id(&mut session, &pool, PRIVILEGE_MINIMAL, location).await,
+        APIError::NotInTeam,
+    );
+    let team = allow_err(team, APIError::NotLogin)?.flatten();
 
-    let team_id = get_team_id(&mut session, &pool, PRIVILEGE_MINIMAL, location).await?;
+    let updated = Utc::now().timestamp();
 
-    let puzzle_id = form.puzzle_id;
-
-    if let Some(result) = cache.check_unlock_cached(team_id, puzzle_id).await? {
-        return Ok(HttpResponse::Ok().json(UnlockResponse::AlreadyUnlocked(result)));
-    }
-
-    let (price, key, is_meta) = cache
-        .query_puzzle_cached(puzzle_id, |puzzle| {
-            (
-                puzzle_unlock_price(puzzle.base.unlock),
-                puzzle.base.key.clone(),
-                puzzle.base.meta,
-            )
+    let data = (1..11)
+        .map(|puzzle_id| PuzzleStatusItem {
+            puzzle_id,
+            passed: 30,
+            unlocked: 230,
+            your_status: team.map(|_| PuzzleStatus::Passed),
         })
-        .await
-        .map_err(|e| e.set_location(location).tap(APIError::log))?;
+        .collect();
 
-    let mut conn = pool
-        .get()
-        .await
-        .map_err(|e| log_server_error(e, location, ERROR_DB_CONNECTION))?;
-
-    if is_meta && count_passed(team_id, &mut conn).await? < 6 {
-        return Ok(HttpResponse::Ok().json(UnlockResponse::NotAllowed));
-    }
-
-    let result = conn
-        .transaction::<_, APIError, _>(|conn| {
-            Box::pin(async move {
-                let new_balance = try_modify_team_balance(
-                    team_id,
-                    -price,
-                    format!("Unlocking puzzle {}", puzzle_id).as_str(),
-                    conn,
-                )
-                .await
-                .map_err(Into::<APIError>::into)
-                .map_err(|e| e.set_location(location).tap(APIError::log))?;
-
-                use crate::schema::unlock::dsl::*;
-
-                diesel::insert_into(unlock)
-                    .values((team.eq(team_id), puzzle.eq(puzzle_id)))
-                    .execute(conn)
-                    .await?;
-
-                Ok(UnlockResponse::Success {
-                    key,
-                    price,
-                    new_balance,
-                })
-            })
-        })
-        .await
-        .map_err(|e| e.set_location(location).tap(APIError::log))?;
-
-    Ok(HttpResponse::Ok().json(result))
+    Ok(HttpResponse::Ok().json(PuzzleStatusResponse { data, updated }))
 }

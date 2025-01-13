@@ -8,8 +8,8 @@ import random
 url = "http://127.0.0.1:9000"
 
 
-def register(openid: int, pw: str) -> int:
-    pw = hashlib.sha256(pw.encode()).hexdigest()
+def register(openid: int, raw_pw: str) -> int:
+    pw = hashlib.sha256(raw_pw.encode()).hexdigest()
     code = token_generator.get_token(2,4,openid).hex()
     s = requests.session()
     res = s.post(url + "/register", json={
@@ -17,8 +17,9 @@ def register(openid: int, pw: str) -> int:
         "password" : pw,
         "token" : code
     })
-    print(res.text)
-    return res.json()['Success']
+    uid = res.json()['Success']
+    print("User {}, Password {}".format(uid, raw_pw))
+    return uid
     
 def login(user_id: int, pw: str):
     s = requests.session()
@@ -30,8 +31,8 @@ def login(user_id: int, pw: str):
         "data": pw
         }
     })
-    print("[{} {}]".format(user_id, pw))
-    print(res.text)
+    # print("[{} {}]".format(user_id, pw))
+    # print(res.text)
     assert("Success" in res.json())
     return s
 
@@ -39,9 +40,9 @@ def login(user_id: int, pw: str):
 def create_team(user_id: int, pw: str) :
     s = login(user_id, pw)
     res = s.post(url + "/create_team")
-    print(res.text)
+    # print(res.text)
     res = s.get(url + "/team_veri")
-    print(res.text)
+    # print(res.text)
 
     token = str(res.json()["Success"]["totp"])
     id = int(res.json()["Success"]["id"])
@@ -57,6 +58,50 @@ def join_team(user_id: int, pw: str, token: str,team_id: int):
     assert("Success" in res.json())
     return s
 
+def get_decipher_key(s: requests.Session, did: int):
+    res = s.get(url + "/decipher_key?decipher_id={}".format(did))
+    print(res.text, res)
+    
+    try:
+        return res.json()["Success"]
+    except:
+        return ""
+
+def buy_decipher_key(s: requests.Session, did: int):
+    res = s.post(url + "/unlock?decipher_id={}".format(did))
+    print(res.text, res)
+    
+    try:
+        return res.json()["Success"]["key"]
+    except:
+        try:
+            return res.json()["AlreadyUnlocked"]
+        except:
+            return ""
+        
+
+def submit_answer(s: requests.Session, pid: int, cipher: str, answer: str):
+    sha = hashlib.sha256((cipher + answer).encode()).hexdigest()
+
+    res = s.post(
+        url + "/submit_answer", json= {
+            "puzzle_id" : pid,
+            "answer" : sha
+        }
+    )
+    print(res.text, res)
+    try:
+        return res.json()["Success"]["key"]
+    except:
+        return ""
+        
+
+def info(s: requests.Session):
+    res = s.get(url + "/info")
+    print(res.text, res)
+    # res = s.get(url + "/puzzle_status")
+    # print(res.text, res)
+    
 
 def prepare_users(user_cnt):
     users = []
@@ -65,7 +110,7 @@ def prepare_users(user_cnt):
     team_id = -1
     
     for i in range(user_cnt):
-        pw = random.randbytes(4).hex()
+        pw = "pw{}".format(i+1)
         user_id =register(i, pw)
         users.append({
             "openid" : i,

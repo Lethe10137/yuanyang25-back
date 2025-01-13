@@ -1,10 +1,12 @@
 import hashlib
 import random
 import string
+from typing import List
 import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import execute_values
 import test_util
+import json
 
 random.seed(4724)
 
@@ -35,50 +37,48 @@ def generate_random_string(length=64):
     """Generate a random string of a given length."""
     return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
 
-def insert_random_puzzle():
-
+def insert_mock_puzzle():
+    
+    backend_data = json.load(open("test/example_data/backend.json"))
+    conn, cursor = None, None
+    
     # Connect to the PostgreSQL database
     try:
         conn = psycopg2.connect(database_url)
         cursor = conn.cursor()
 
         # Prepare the INSERT query
-        query = sql.SQL("""
-            INSERT INTO puzzle (unlock ,bounty, title, answer, key, content, meta)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        query1 = sql.SQL("""
+            INSERT INTO puzzle (id, meta, bounty, title, decipher, depth)
+            VALUES (%s, %s, %s, %s, %s, %s)
             RETURNING id
         """)
         
         query2 = sql.SQL("""
-            INSERT INTO mid_answer (puzzle, query, response)
+            INSERT INTO answer (puzzle, level, sha256)
             VALUES (%s, %s, %s)
         """)
 
         result = []
 
-        for i in range(NUM_PUZZLES):
+        for puzzle in backend_data:
             
-            bounty = random.randint(100, 10000)  # Random integer for bounty
-            unlock = i * 1000  
-            title = generate_random_string(10)  # Random string of length 10
-            answer = generate_random_string(10)  # Random string of length 10
-            key = generate_random_string(16)  # Random string of length 16
-            content = generate_random_string(100)  # Random string of length 100
+            puzzle_id = puzzle["puzzle_id"]
+            title = puzzle["title"]
+            meta = puzzle["meta"]
+            bounty = puzzle["bounty"]
+            decipher = puzzle["decipher_id"]
+            
+            answers: List[str] = puzzle["expected_cipher_answer"]
 
-            cursor.execute(query, (unlock, bounty, title, answer, key, content, i == 0))
+            cursor.execute(query1, (puzzle_id, meta, bounty, title, decipher, len(answers)))
+            result.append(int(puzzle_id))
             
-            inserted_id = cursor.fetchone()[0]
-            
-            mid1, mid2 = generate_random_string(10), generate_random_string(10)
-            
-            result.append((answer, key, mid1, mid2, inserted_id))
-            cursor.execute(query2, (inserted_id, mid1, generate_random_string(20)))
-            cursor.execute(query2, (inserted_id, mid2, generate_random_string(20)))
-            
-
+            for (level, answer) in enumerate(reversed(answers)):            
+                cursor.execute(query2, (puzzle_id, level, answer))
         # Commit the transaction
         conn.commit()
-        print("%d rows successfully inserted into the 'puzzle' table.", NUM_PUZZLES)
+
         return result
 
     except Exception as e:
@@ -96,20 +96,21 @@ def insert_random_puzzle():
 
 
 
-def insert_unlock(puzzles):
+def insert_decipher():
+    
+    data = json.load(open("test/example_data/cipher_key.json"))
+    
     # Connect to the database
     conn = psycopg2.connect(database_url)
     try:
         with conn:
             with conn.cursor() as cursor:
                 query = sql.SQL("""
-                INSERT INTO "unlock" ("team", "puzzle") VALUES (%s, %s);
+                INSERT INTO "decipher" ("id", "pricing_type", "base_price", "depth", "root") VALUES (%s, %s, %s, %s, %s);
                 """)
-                for team in range(1, NUM_TEAMS+1):
-                    for puzzle in puzzles:
-                        if random.random() < 0.3:
-                            print(team, puzzle)
-                            cursor.execute(query, (team, puzzle))
+                for item in data:
+                    decipher_id, (sha, price, pricing_type, depth ) = item
+                    cursor.execute(query, (decipher_id, pricing_type, price, depth, sha))
                             
             conn.commit()
                 
@@ -123,18 +124,15 @@ if __name__ == "__main__":
     import time
     subprocess.run(["diesel","migration","redo" ,"--all"])
     
+    insert_mock_puzzle()
+    insert_decipher()
+    
     users = test_util.prepare_users(NUM_TEAMS * 3)
-    puzzles = insert_random_puzzle()
-    
-    print(puzzles)
-    
-
-    insert_unlock([t[-1] for t in puzzles])
-    
-    
-    
     s = test_util.login(users[0]["id"], users[0]["pw"])
     
+    
+    
+    exit(0)
     puzzle_id = puzzles[0][-1]
     
     res = s.post(
@@ -192,11 +190,11 @@ if __name__ == "__main__":
     
     print("decipher")
     for i in range(NUM_PUZZLES):
-        res = s.get(test_util.url + "/decipher_key?puzzle_id={}".format(i+1))
+        res = s.get(test_util.url + "/decipher_key?decipher_id={}".format(i+1))
         print(i+1, res.text, res)
         
         
     print("unlock")
     for i in range(NUM_PUZZLES):
-        res = s.post(test_util.url + "/unlock?puzzle_id={}".format(i+1))
+        res = s.post(test_util.url + "/unlock?decipher_id={}".format(i+1))
         print(i+1, res.text, res)

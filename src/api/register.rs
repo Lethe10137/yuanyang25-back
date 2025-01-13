@@ -10,6 +10,7 @@ use dotenv::dotenv;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::sync::Arc;
 
 use crate::models::User;
 use crate::util::cipher_util::DecodeTokenError;
@@ -105,7 +106,7 @@ fn set_loggedin_session(
 //
 #[post("/register")]
 pub async fn register_user(
-    pool: web::Data<DbPool>,
+    pool: web::Data<Arc<DbPool>>,
     form: web::Json<RegisterRequest>,
     mut session: Session,
 ) -> Result<impl Responder, APIError> {
@@ -162,7 +163,7 @@ pub async fn register_user(
 //
 #[post("/login")]
 async fn login_user(
-    pool: web::Data<DbPool>,
+    pool: web::Data<Arc<DbPool>>,
     form: web::Json<LoginRequest>,
     mut session: Session,
 ) -> Result<impl Responder, APIError> {

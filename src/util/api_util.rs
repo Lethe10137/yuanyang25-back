@@ -13,8 +13,8 @@ use derive_more::derive::Display;
 use diesel::prelude::*;
 
 use crate::{
-    api::puzzle::Puzzle,
-    models::{Hint, MidAnswer, PuzzleBase, PuzzleId, Team, TeamId, User},
+    models::{PuzzleId, Team, TeamId, User, WaPenalty},
+    util::economy::time_allowance,
     DbPool, Ext,
 };
 use log::error;
@@ -55,6 +55,9 @@ pub enum APIError {
 
     #[display("Unauthorized access")]
     Unauthorized,
+
+    #[display("Transaction cancelled, balance matained as {balance}")]
+    TransactionCancel { balance: i64 },
 
     #[display("Server error at {location}, ref[{refnum}]: {msg}")]
     ServerError {
@@ -215,81 +218,22 @@ where
     }
 }
 
-pub async fn fetch_puzzle_from_id<C>(puzzle_id: i32, conn: &mut C) -> Result<Puzzle, APIError>
+pub async fn fetch_balance<C>(team_id: TeamId, conn: &mut C) -> Result<Option<i64>, APIError>
 where
     C: DerefMut<Target = AsyncPgConnection> + std::marker::Send,
 {
-    use crate::schema::hint::dsl as hint_dsl;
-    use crate::schema::mid_answer::dsl as mid_answer_dsl;
-    use crate::schema::puzzle::dsl as puzzle_dsl;
+    use crate::schema::team::dsl::*;
 
-    let puzzle_item = match puzzle_dsl::puzzle
-        .filter(puzzle_dsl::id.eq(puzzle_id))
-        .select((
-            puzzle_dsl::meta,
-            puzzle_dsl::unlock,
-            puzzle_dsl::bounty,
-            puzzle_dsl::title,
-            puzzle_dsl::answer,
-            puzzle_dsl::key,
-        ))
-        .first::<PuzzleBase>(conn)
+    match team
+        .filter(id.eq(team_id))
+        .select(token_balance)
+        .first::<i64>(conn)
         .await
     {
-        Ok(p) => Ok(p),
-        Err(Error::NotFound) => Err(APIError::InvalidQuery),
-        Err(e) => Err(new_unlocated_server_error(e, ERROR_DB_UNKNOWN)),
-    }?;
-
-    let mid_answers = match mid_answer_dsl::mid_answer
-        .filter(mid_answer_dsl::puzzle.eq(puzzle_id))
-        .load::<MidAnswer>(conn)
-        .await
-    {
-        Ok(p) => Ok(p),
-        Err(Error::NotFound) => Err(APIError::InvalidQuery),
-        Err(e) => Err(new_unlocated_server_error(e, ERROR_DB_UNKNOWN)),
-    }?;
-
-    let hints = match hint_dsl::hint
-        .filter(hint_dsl::puzzle.eq(puzzle_id))
-        .load::<Hint>(conn)
-        .await
-    {
-        Ok(p) => Ok(p),
-        Err(Error::NotFound) => Err(APIError::InvalidQuery),
-        Err(e) => Err(new_unlocated_server_error(e, ERROR_DB_UNKNOWN)),
-    }?;
-
-    Ok(Puzzle::new(puzzle_item, hints, mid_answers))
-}
-
-pub async fn fetch_unlock_time<C>(
-    puzzle_id: PuzzleId,
-    team_id: TeamId,
-    conn: &mut C,
-) -> Result<Option<DateTime<Utc>>, APIError>
-where
-    C: DerefMut<Target = AsyncPgConnection> + std::marker::Send,
-{
-    use crate::schema::unlock::dsl::*;
-
-    match unlock
-        .filter(team.eq(team_id).and(puzzle.eq(puzzle_id)))
-        .select(time)
-        .first::<DateTime<Utc>>(conn)
-        .await
-    {
-        Ok(t) => Ok(Some(t)),
+        Ok(t) => Ok(Some(t + time_allowance())),
         Err(Error::NotFound) => Ok(None),
         Err(e) => Err(new_unlocated_server_error(e, ERROR_DB_UNKNOWN)),
     }
-}
-
-pub struct WaPenalty {
-    pub time_penalty_until: DateTime<Utc>,
-    pub token_penalty_level: i32,
-    pub time_penalty_level: i32,
 }
 
 static TIME_PENALTY: [i64; 10] = [10, 60, 120, 120, 120, 240, 480, 480, 480, 600]; // in seconds
@@ -413,29 +357,6 @@ where
     Ok(())
 }
 
-pub async fn insert_or_update_unlock_time<C>(
-    puzzle_id: PuzzleId,
-    team_id: TeamId,
-    new_time: DateTime<Utc>,
-    conn: &mut C,
-) -> Result<(), APIError>
-where
-    C: DerefMut<Target = AsyncPgConnection> + std::marker::Send,
-{
-    use crate::schema::unlock::dsl::*;
-
-    diesel::insert_into(unlock)
-        .values((team.eq(team_id), puzzle.eq(puzzle_id), time.eq(new_time)))
-        .on_conflict((team, puzzle))
-        .do_update()
-        .set(time.eq(new_time))
-        .execute(conn)
-        .await
-        .map_err(|e| new_unlocated_server_error(e, ERROR_DB_UNKNOWN))?;
-
-    Ok(())
-}
-
 pub fn log_server_error<E>(error: E, location: &'static str, msg: &'static str) -> APIError
 where
     E: derive_more::Display,
@@ -472,6 +393,14 @@ pub fn kill_session(session: &mut Session) -> impl FnMut(&APIError) + '_ {
         if result == &APIError::InvalidSession {
             session.clear()
         };
+    }
+}
+
+pub fn allow_err<T>(old: Result<T, APIError>, allow: APIError) -> Result<Option<T>, APIError> {
+    match old {
+        Err(e) if e == allow => Ok(None),
+        Ok(i) => Ok(Some(i)),
+        Err(e) => Err(e),
     }
 }
 

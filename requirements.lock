@@ -16,9 +16,17 @@ charset-normalizer==3.4.1
     # via requests
 idna==3.10
     # via requests
+markdown-it-py==3.0.0
+    # via rich
+mdurl==0.1.2
+    # via markdown-it-py
 psycopg2==2.9.10
     # via back2025
+pygments==2.19.1
+    # via rich
 requests==2.32.3
+    # via back2025
+rich==13.9.4
     # via back2025
 urllib3==2.3.0
     # via requests

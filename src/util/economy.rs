@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
+use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use diesel::QueryDsl;
 use diesel_async::AsyncPgConnection;
@@ -16,6 +17,7 @@ use super::api_util::{new_unlocated_server_error, APIError};
 #[derive(Debug)]
 pub enum UpdateBalanceError {
     InsufficientFunds,
+    TransactionCancel(i64),
     DieselError(DieselError),
 }
 
@@ -29,6 +31,9 @@ impl From<UpdateBalanceError> for APIError {
     fn from(value: UpdateBalanceError) -> Self {
         match value {
             UpdateBalanceError::InsufficientFunds => APIError::InsufficientTokens,
+            UpdateBalanceError::TransactionCancel(balance) => {
+                APIError::TransactionCancel { balance }
+            }
             UpdateBalanceError::DieselError(error) => new_unlocated_server_error(error, "Economy"),
         }
     }
@@ -39,11 +44,12 @@ pub async fn try_modify_team_balance<C>(
     amount: i64,
     description: &str,
     conn: &mut C,
+    purchase: Option<i32>,
 ) -> Result<i64, UpdateBalanceError>
 where
     C: DerefMut<Target = AsyncPgConnection> + std::marker::Send,
 {
-    modify_team_balance(team_id, amount, description, conn, false).await
+    modify_team_balance(team_id, amount, description, conn, false, purchase).await
 }
 
 pub async fn compulsory_team_balance<C>(
@@ -55,7 +61,7 @@ pub async fn compulsory_team_balance<C>(
 where
     C: DerefMut<Target = AsyncPgConnection> + std::marker::Send,
 {
-    modify_team_balance(team_id, amount, description, conn, true).await
+    modify_team_balance(team_id, amount, description, conn, true, None).await
 }
 
 /// Attempts to modify the team's token balance and logs the transaction.
@@ -66,6 +72,7 @@ async fn modify_team_balance<C>(
     description: &str,
     conn: &mut C,
     allow_negative: bool,
+    purchase: Option<i32>,
 ) -> Result<i64, UpdateBalanceError>
 where
     C: DerefMut<Target = AsyncPgConnection> + std::marker::Send,
@@ -89,15 +96,6 @@ where
         return Err(UpdateBalanceError::InsufficientFunds);
     }
 
-    // Update the team's balance
-    diesel::update(team_dsl::team.filter(team_dsl::id.eq(team_id)))
-        .set((
-            team_dsl::token_balance.eq(new_balance),
-            team_dsl::confirmed.eq(true),
-        ))
-        .execute(conn)
-        .await?;
-
     // Log the transaction
     diesel::insert_into(transaction_dsl::transaction)
         .values((
@@ -106,6 +104,22 @@ where
             transaction_dsl::amount.eq(amount),
             transaction_dsl::balance.eq(new_balance),
             transaction_dsl::allowance.eq(time_allowance),
+            transaction_dsl::purchase_ref.eq(purchase),
+        ))
+        .execute(conn)
+        .await
+        .map_err(|e| match e {
+            DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _) => {
+                UpdateBalanceError::TransactionCancel(current_balance + time_allowance)
+            }
+            e => UpdateBalanceError::from(e),
+        })?;
+
+    // Update the team's balance
+    diesel::update(team_dsl::team.filter(team_dsl::id.eq(team_id)))
+        .set((
+            team_dsl::token_balance.eq(new_balance),
+            team_dsl::confirmed.eq(true),
         ))
         .execute(conn)
         .await?;
@@ -131,12 +145,8 @@ pub fn puzzle_reward(base_reward: i32) -> i64 {
     (base_reward * 2).into()
 }
 
-pub fn puzzle_unlock_price(base_price: i32) -> i64 {
-    (base_price * 2).into()
-}
-
-pub fn puzzle_hint_price(base_price: i32) -> i64 {
-    (base_price * 2).into()
+pub fn deciper_price(pricing_type: i32, base_price: i32) -> i64 {
+    (base_price * (1 + pricing_type)) as i64
 }
 
 pub fn time_allowance() -> i64 {

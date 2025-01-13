@@ -1,32 +1,23 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
-    hint (id) {
+    answer (id) {
         id -> Int4,
-        #[max_length = 64]
-        title -> Varchar,
-        base_price -> Int8,
         puzzle -> Int4,
-        content -> Text,
+        level -> Int4,
+        #[max_length = 64]
+        sha256 -> Bpchar,
     }
 }
 
 diesel::table! {
-    mid_answer (id) {
+    decipher (id) {
         id -> Int4,
-        puzzle -> Int4,
+        pricing_type -> Int4,
+        base_price -> Int4,
+        depth -> Int4,
         #[max_length = 64]
-        query -> Varchar,
-        response -> Text,
-    }
-}
-
-diesel::table! {
-    mid_answer_submission (id) {
-        id -> Int4,
-        team -> Int4,
-        mid_answer -> Int4,
-        time -> Timestamptz,
+        root -> Bpchar,
     }
 }
 
@@ -46,15 +37,11 @@ diesel::table! {
     puzzle (id) {
         id -> Int4,
         meta -> Bool,
-        unlock -> Int4,
         bounty -> Int4,
         #[max_length = 64]
         title -> Varchar,
-        #[max_length = 64]
-        answer -> Varchar,
-        #[max_length = 64]
-        key -> Varchar,
-        content -> Text,
+        decipher -> Int4,
+        depth -> Int4,
     }
 }
 
@@ -65,6 +52,7 @@ diesel::table! {
         reward -> Int8,
         time -> Timestamptz,
         puzzle -> Int4,
+        depth -> Int4,
     }
 }
 
@@ -90,6 +78,7 @@ diesel::table! {
         amount -> Int8,
         balance -> Int8,
         allowance -> Int8,
+        purchase_ref -> Nullable<Int4>,
         time -> Timestamptz,
     }
 }
@@ -97,9 +86,9 @@ diesel::table! {
 diesel::table! {
     unlock (id) {
         id -> Int4,
-        time -> Timestamptz,
         team -> Int4,
-        puzzle -> Int4,
+        decipher -> Int4,
+        level -> Int4,
     }
 }
 
@@ -130,25 +119,20 @@ diesel::table! {
     }
 }
 
-diesel::joinable!(hint -> puzzle (puzzle));
-diesel::joinable!(mid_answer -> puzzle (puzzle));
-diesel::joinable!(mid_answer_submission -> mid_answer (mid_answer));
-diesel::joinable!(mid_answer_submission -> team (team));
+diesel::joinable!(answer -> puzzle (puzzle));
 diesel::joinable!(oracle -> puzzle (puzzle));
 diesel::joinable!(oracle -> team (team));
 diesel::joinable!(submission -> puzzle (puzzle));
 diesel::joinable!(submission -> team (team));
 diesel::joinable!(transaction -> team (team));
-diesel::joinable!(unlock -> puzzle (puzzle));
+diesel::joinable!(unlock -> decipher (decipher));
 diesel::joinable!(unlock -> team (team));
-diesel::joinable!(users -> team (team));
 diesel::joinable!(wrong_answer_cnt -> puzzle (puzzle));
 diesel::joinable!(wrong_answer_cnt -> team (team));
 
 diesel::allow_tables_to_appear_in_same_query!(
-    hint,
-    mid_answer,
-    mid_answer_submission,
+    answer,
+    decipher,
     oracle,
     puzzle,
     submission,

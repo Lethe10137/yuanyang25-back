@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::schema::{team, users};
 use crate::util::{api_util::*, cipher_util};
 
@@ -27,7 +29,7 @@ enum CreateTeamResponse {
 // Response Body: `CreateTeamResponse`
 #[post("/create_team")]
 async fn create_team(
-    pool: web::Data<DbPool>,
+    pool: web::Data<Arc<DbPool>>,
     mut session: Session,
 ) -> Result<impl Responder, APIError> {
     let location = "create_team";
@@ -88,7 +90,7 @@ async fn create_team(
     Ok(HttpResponse::Ok().json(result))
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, PartialEq)]
 enum TeamTOTPResponse {
     Success { id: i32, totp: String },
     NotInTeam,
@@ -102,7 +104,7 @@ enum TeamTOTPResponse {
 // Response Body: `TeamTOTPResponse`
 #[get("/team_veri")]
 async fn team_veri(
-    pool: web::Data<DbPool>,
+    pool: web::Data<Arc<DbPool>>,
     mut session: Session,
 ) -> Result<impl Responder, APIError> {
     let location = "team_veri";
@@ -144,6 +146,10 @@ async fn team_veri(
         .map(handle_session(&mut session))
         .map_err(|e| e.set_location(location).tap(APIError::log))?;
 
+    if result == TeamTOTPResponse::NotInTeam {
+        return Err(APIError::NotInTeam);
+    }
+
     Ok(HttpResponse::Ok().json(result))
 }
 
@@ -175,7 +181,7 @@ enum JoinTeamResponse {
 // Response Body: `TeamTOTPResponse`
 #[post("/join_team")]
 async fn join_team(
-    pool: web::Data<DbPool>,
+    pool: web::Data<Arc<DbPool>>,
     form: web::Json<JoinTeamRequest>,
     mut session: Session,
 ) -> Result<impl Responder, APIError> {
@@ -254,7 +260,7 @@ enum ExitTeamResponse {
 // Response Body: `ExitTeamResponse`
 #[post("/exit_team")]
 async fn exit_team(
-    pool: web::Data<DbPool>,
+    pool: web::Data<Arc<DbPool>>,
     mut session: Session,
 ) -> Result<impl Responder, APIError> {
     let location = "exit_team";
@@ -307,4 +313,53 @@ async fn exit_team(
         .map_err(|e| e.set_location(location).tap(APIError::log))?;
 
     Ok(HttpResponse::Ok().json(result))
+}
+
+#[derive(Debug, Serialize)]
+struct InfoResponse {
+    user_id: i32,
+    privilege: i32,
+    team_id: Option<i32>,
+    token_balance: Option<i64>,
+}
+
+// [[API]]
+// desp: get basic info
+// Method: GET
+// URL: /exit_team
+// Request Body: N/A
+// Response Body: `InfoResponse`
+#[get("/info")]
+async fn info(
+    pool: web::Data<Arc<DbPool>>,
+    mut session: Session,
+) -> Result<impl Responder, APIError> {
+    let location = "info";
+
+    let (user_id, privilege) = user_privilege_check(&session, PRIVILEGE_MINIMAL)?;
+
+    let team_id = allow_err(
+        get_team_id(&mut session, &pool, PRIVILEGE_MINIMAL, location).await,
+        APIError::NotInTeam,
+    )?;
+
+    let mut conn = pool
+        .get()
+        .await
+        .map_err(|e| log_server_error(e, location, ERROR_DB_CONNECTION))?;
+
+    let token_balance = if let Some(team_id) = team_id {
+        fetch_balance(team_id, &mut conn)
+            .await
+            .map_err(|e| log_server_error(e, location, ERROR_DB_CONNECTION))?
+    } else {
+        None
+    };
+
+    Ok(HttpResponse::Ok().json(InfoResponse {
+        user_id,
+        privilege,
+        team_id,
+        token_balance,
+    }))
 }

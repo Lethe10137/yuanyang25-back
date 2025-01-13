@@ -1,6 +1,8 @@
 extern crate diesel;
 extern crate dotenv;
 
+use std::sync::Arc;
+
 use actix_web::{web, App, HttpServer};
 
 use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
@@ -37,6 +39,7 @@ async fn main() -> std::io::Result<()> {
         _ => true, // Production mode as default!
     };
 
+    let pool = Arc::new(pool);
     let cache = Cache::new(pool.clone());
 
     HttpServer::new(move || {
@@ -55,9 +58,11 @@ async fn main() -> std::io::Result<()> {
             .service(team::team_veri)
             .service(team::join_team)
             .service(team::exit_team)
+            .service(team::info)
             .service(puzzle::decipher_key)
             .service(puzzle::submit_answer)
             .service(puzzle::unlock)
+            .service(puzzle::puzzle_status)
     })
     .bind("0.0.0.0:9000")?
     .run()

@@ -1,49 +1,244 @@
-use chrono::{DateTime, Utc};
-use diesel_async::pooled_connection::bb8::PooledConnection;
-use std::collections::HashMap;
+use chrono::{DateTime, TimeZone, Utc};
+use diesel::query_dsl::QueryDsl;
+use diesel::result::Error;
+use diesel::ExpressionMethods;
+use diesel_async::RunQueryDsl;
 
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 use crate::api::puzzle::Puzzle;
 use crate::models::*;
-use crate::util::api_util::{
-    check_is_after, fetch_puzzle_from_id, fetch_wa_cnt, ERROR_DB_CONNECTION,
-};
+use crate::util::api_util::ERROR_DB_CONNECTION;
 
-use super::api_util::{
-    fetch_unlock_time, insert_or_update_unlock_time, log_server_error, APIError,
-};
+use crate::util::auto_fetch::Expiration;
+
+use super::api_util::{log_server_error, APIError};
 
 use crate::DbPool;
 
-use diesel_async::AsyncPgConnection;
+use super::auto_fetch::{AutoCache, AutoCacheReadHandle, AutoCacheWriteHandle};
 
-#[derive(Clone)]
+type APICache<K, V> = AutoCache<
+    K,
+    V,
+    Box<dyn Fn(K) -> AutoCacheReadHandle<V, APIError> + Send + Sync>,
+    Box<dyn Fn(K, V) -> AutoCacheWriteHandle<APIError> + Send + Sync>,
+    APIError,
+>;
+
 #[allow(clippy::type_complexity)]
+#[derive(Clone)]
 pub struct Cache {
-    unlock_cache: Arc<RwLock<HashMap<(TeamId, PuzzleId), DateTime<Utc>>>>,
-    puzzle_cache: Arc<RwLock<HashMap<PuzzleId, Puzzle>>>,
-    time_punish_cache: Arc<RwLock<HashMap<(TeamId, PuzzleId), DateTime<Utc>>>>,
-    pool: DbPool,
+    pub unlock_cache: Arc<APICache<(TeamId, DecipherId), Option<i32>>>,
+    pub puzzle_cache: Arc<APICache<PuzzleId, Arc<Puzzle>>>,
+    pub time_punish_cache: Arc<APICache<(TeamId, PuzzleId), DateTime<Utc>>>,
+    pub decipher_cache: Arc<APICache<DecipherId, Arc<Decipher>>>,
+}
+
+fn fetchdb_unlock_level(
+    pool: Arc<DbPool>,
+    key: (TeamId, DecipherId),
+) -> AutoCacheReadHandle<Option<i32>, APIError> {
+    use crate::schema::unlock::dsl::*;
+    tokio::spawn(async move {
+        let mut conn = pool
+            .get()
+            .await
+            .map_err(|e| log_server_error(e, "cache", ERROR_DB_CONNECTION))?;
+        let (team_key, decipher_key) = key;
+        match unlock
+            .filter(team.eq(team_key))
+            .filter(decipher.eq(decipher_key))
+            .select(level)
+            .first::<i32>(&mut conn)
+            .await
+        {
+            Ok(0) => Ok((Some(0), Expiration::Long)),
+            Ok(level_value) => Ok((Some(level_value), Expiration::Short)),
+            Err(Error::NotFound) => Ok((None, Expiration::Short)),
+            Err(err) => Err(log_server_error(err, "cache", ERROR_DB_CONNECTION)),
+        }
+    })
+}
+
+fn writedb_unlock_level(
+    pool: Arc<DbPool>,
+    key: (TeamId, DecipherId),
+    value: Option<i32>,
+) -> AutoCacheWriteHandle<APIError> {
+    use crate::schema::unlock::dsl::*;
+    tokio::spawn(async move {
+        let mut conn = pool
+            .get()
+            .await
+            .map_err(|e| log_server_error(e, "cache", ERROR_DB_CONNECTION))?;
+        let (team_key, decipher_key) = key;
+        if let Some(value) = value {
+            diesel::insert_into(unlock)
+                .values((
+                    team.eq(team_key),
+                    decipher.eq(decipher_key),
+                    level.eq(value),
+                ))
+                .on_conflict((team, decipher))
+                .do_update()
+                .set(level.eq(value))
+                .execute(&mut conn)
+                .await
+                .map_err(|e| log_server_error(e, "cache", ERROR_DB_CONNECTION))?;
+        }
+        Ok(())
+    })
+}
+
+fn fetchdb_puzzle(
+    pool: Arc<DbPool>,
+    puzzle_id: PuzzleId,
+) -> AutoCacheReadHandle<Arc<Puzzle>, APIError> {
+    use crate::schema::answer::dsl as answer_dsl;
+    use crate::schema::puzzle::dsl as puzzle_dsl;
+
+    tokio::spawn(async move {
+        let mut conn = pool
+            .get()
+            .await
+            .map_err(|e| log_server_error(e, "cache", ERROR_DB_CONNECTION))?;
+        let puzzle_item = match puzzle_dsl::puzzle
+            .filter(puzzle_dsl::id.eq(puzzle_id))
+            .select((
+                puzzle_dsl::meta,
+                puzzle_dsl::bounty,
+                puzzle_dsl::title,
+                puzzle_dsl::decipher,
+                puzzle_dsl::depth,
+            ))
+            .first::<PuzzleBase>(&mut conn)
+            .await
+        {
+            Ok(p) => Ok(p),
+            Err(Error::NotFound) => Err(APIError::InvalidQuery),
+            Err(err) => Err(log_server_error(err, "cache", ERROR_DB_CONNECTION)),
+        }?;
+
+        let answers = match answer_dsl::answer
+            .filter(answer_dsl::puzzle.eq(puzzle_id))
+            .select((answer_dsl::sha256, answer_dsl::level))
+            .load::<(String, i32)>(&mut conn)
+            .await
+        {
+            Ok(p) => Ok(p),
+            Err(Error::NotFound) => Ok(vec![]),
+            Err(err) => Err(log_server_error(err, "cache", ERROR_DB_CONNECTION)),
+        }?;
+
+        Ok((
+            Arc::new(Puzzle::new(puzzle_item, answers)),
+            Expiration::Long,
+        ))
+    })
+}
+
+fn fetchdb_decipher(
+    pool: Arc<DbPool>,
+    decipher_id: DecipherId,
+) -> AutoCacheReadHandle<Arc<Decipher>, APIError> {
+    use crate::schema::decipher::dsl::*;
+
+    tokio::spawn(async move {
+        let mut conn = pool
+            .get()
+            .await
+            .map_err(|e| log_server_error(e, "cache", ERROR_DB_CONNECTION))?;
+        let item = match decipher
+            .filter(id.eq(decipher_id))
+            .select((pricing_type, base_price, depth, root))
+            .first::<Decipher>(&mut conn)
+            .await
+        {
+            Ok(p) => Ok(p),
+            Err(Error::NotFound) => Err(APIError::InvalidQuery),
+            Err(err) => Err(log_server_error(err, "cache", ERROR_DB_CONNECTION)),
+        }?;
+
+        Ok((Arc::new(item), Expiration::Long))
+    })
+}
+
+fn fetchdb_time_punish(
+    pool: Arc<DbPool>,
+    key: (TeamId, PuzzleId),
+) -> AutoCacheReadHandle<DateTime<Utc>, APIError> {
+    use crate::schema::wrong_answer_cnt::dsl::*;
+    tokio::spawn(async move {
+        let mut conn = pool
+            .get()
+            .await
+            .map_err(|e| log_server_error(e, "cache", ERROR_DB_CONNECTION))?;
+        let (team_key, puzzle_key) = key;
+        match wrong_answer_cnt
+            .filter(team.eq(team_key))
+            .filter(puzzle.eq(puzzle_key))
+            .select(time_penalty_until)
+            .first::<DateTime<Utc>>(&mut conn)
+            .await
+        {
+            Ok(time) => Ok((time, Expiration::Middle)),
+            Err(Error::NotFound) => Ok((Utc.timestamp_opt(1, 0).unwrap(), Expiration::AtOnce)),
+            Err(err) => Err(log_server_error(err, "cache", ERROR_DB_CONNECTION)),
+        }
+    })
 }
 
 impl Cache {
     // 初始化
-    pub fn new(pool: DbPool) -> Self {
-        Self {
-            unlock_cache: Arc::new(RwLock::new(HashMap::new())),
-            puzzle_cache: Arc::new(RwLock::new(HashMap::new())),
-            time_punish_cache: Arc::new(RwLock::new(HashMap::new())),
-            pool,
-        }
-    }
+    pub fn new(pool: Arc<DbPool>) -> Self {
+        let fetch_closure_unlock = {
+            let pool = Arc::clone(&pool);
+            Box::new(move |key| fetchdb_unlock_level(Arc::clone(&pool), key))
+        };
 
-    async fn get_connection(&self) -> Result<PooledConnection<AsyncPgConnection>, APIError> {
-        self.pool
-            .get()
-            .await
-            .map_err(|e| log_server_error(e, "cache", ERROR_DB_CONNECTION))
+        let write_closure_unlock = {
+            let pool = Arc::clone(&pool);
+            Box::new(move |key, value| writedb_unlock_level(Arc::clone(&pool), key, value))
+        };
+
+        let fetch_closure_puzzle = {
+            let pool = Arc::clone(&pool);
+            Box::new(move |key| fetchdb_puzzle(Arc::clone(&pool), key))
+        };
+
+        let fetch_closure_decipher = {
+            let pool = Arc::clone(&pool);
+            Box::new(move |key| fetchdb_decipher(Arc::clone(&pool), key))
+        };
+
+        let fetch_closure_time_punish = {
+            let pool = Arc::clone(&pool);
+            Box::new(move |key| fetchdb_time_punish(Arc::clone(&pool), key))
+        };
+
+        Self {
+            unlock_cache: Arc::new(AutoCache::new(
+                256,
+                fetch_closure_unlock,
+                write_closure_unlock,
+            )),
+            puzzle_cache: Arc::new(AutoCache::new(
+                256,
+                fetch_closure_puzzle,
+                Box::new(|_, _| unimplemented!()), // Never write a puzzle
+            )),
+            time_punish_cache: Arc::new(AutoCache::new(
+                256,
+                fetch_closure_time_punish,
+                Box::new(|_, _| tokio::spawn(async { Ok(()) })), // Is written otherwise
+            )),
+            decipher_cache: Arc::new(AutoCache::new(
+                256,
+                fetch_closure_decipher,
+                Box::new(|_, _| unimplemented!()), // Never write a puzzle
+            )),
+        }
     }
 
     pub async fn query_puzzle_cached<T, F>(
@@ -55,96 +250,33 @@ impl Cache {
         F: FnOnce(&Puzzle) -> T,
         T: Sized,
     {
-        let guard = self.puzzle_cache.read();
-        if let Some(entry) = guard.await.get(&puzzle_id) {
-            return Ok(query(entry));
-        }
-
-        let entry = fetch_puzzle_from_id(puzzle_id, &mut self.get_connection().await?).await?;
-
-        let guard = self.puzzle_cache.write();
-        let mut cache = guard.await;
-        let result = query(&entry);
-        cache.insert(puzzle_id, entry);
-        Ok(result)
+        self.puzzle_cache
+            .get(puzzle_id)
+            .await
+            .map(|puzzle| query(&puzzle))
     }
 
-    pub async fn check_unlock_cached(
-        &self,
-        team_id: TeamId,
-        puzzle_id: PuzzleId,
-    ) -> Result<Option<String>, APIError> {
-        let query = |puzzle: &Puzzle| puzzle.base.key.clone();
-        let guard = self.unlock_cache.read();
-        let unlocked = guard.await.get(&(team_id, puzzle_id)).is_some();
-
-        if unlocked {
-            Ok(Some(self.query_puzzle_cached(puzzle_id, query).await?))
-        } else if let Some(unlock_time) =
-            fetch_unlock_time(puzzle_id, team_id, &mut self.get_connection().await?).await?
-        {
-            self.unlock_cache
-                .write()
-                .await
-                .insert((team_id, puzzle_id), unlock_time);
-            Ok(Some(self.query_puzzle_cached(puzzle_id, query).await?))
-        } else {
-            Ok(None)
-        }
-    }
-
-    pub async fn check_no_submission_cached(
+    pub async fn query_wa_penalty(
         &self,
         team_id: TeamId,
         puzzle_id: PuzzleId,
     ) -> Result<Option<DateTime<Utc>>, APIError> {
-        let guard = self.time_punish_cache.read();
-
+        let cached_penalty = self.time_punish_cache.get((team_id, puzzle_id)).await?;
         let now = Utc::now();
 
-        if let Some(no_submission_until) = guard
-            .await
-            .get(&(team_id, puzzle_id))
-            .cloned()
-            .and_then(|t| check_is_after(t, now))
-        {
-            //The cached penalty is valid till now!
-            return Ok(Some(no_submission_until));
+        if cached_penalty > now {
+            return Ok(Some(cached_penalty));
         }
 
-        if let Some(new_penalty) =
-            fetch_wa_cnt(puzzle_id, team_id, &mut self.get_connection().await?)
-                .await?
-                .and_then(|wa_penalty| check_is_after(wa_penalty.time_penalty_until, now))
-        {
-            //Found new valid penalty in database, cache and return it.
-            self.time_punish_cache
-                .write()
-                .await
-                .insert((team_id, puzzle_id), new_penalty);
-            return Ok(Some(new_penalty));
+        self.time_punish_cache
+            .invalidate((team_id, puzzle_id))
+            .await;
+
+        if cached_penalty < Utc.timestamp_opt(1000000, 0).unwrap() {
+            //Only happens when fetched no such record.
+            return Ok(None);
         }
+
         Ok(None)
-    }
-
-    pub async fn add_unlock_cache(
-        &self,
-        team_id: TeamId,
-        puzzle_id: PuzzleId,
-    ) -> Result<(), APIError> {
-        let unlock_time = Utc::now();
-
-        self.unlock_cache
-            .write()
-            .await
-            .insert((team_id, puzzle_id), unlock_time);
-
-        insert_or_update_unlock_time(
-            puzzle_id,
-            team_id,
-            unlock_time,
-            &mut self.get_connection().await?,
-        )
-        .await
     }
 }
