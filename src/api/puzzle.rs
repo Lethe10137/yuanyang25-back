@@ -13,7 +13,6 @@ use crate::util::economy::{
 
 use actix_web::{get, post, web, HttpResponse, Responder};
 
-use chrono::Utc;
 use diesel::ExpressionMethods;
 use diesel_async::{AsyncConnection, RunQueryDsl};
 
@@ -89,7 +88,7 @@ enum DecipherKeyResponse {
 #[get("/decipher_key")]
 async fn decipher_key(
     pool: web::Data<Arc<DbPool>>,
-    cache: web::Data<Cache>,
+    cache: web::Data<Arc<Cache>>,
     form: web::Query<DecipherKeyRequest>,
     mut session: Session,
 ) -> Result<impl Responder, APIError> {
@@ -139,7 +138,7 @@ enum UnlockResponse {
 #[post("/unlock")]
 async fn unlock(
     pool: web::Data<Arc<DbPool>>,
-    cache: web::Data<Cache>,
+    cache: web::Data<Arc<Cache>>,
     form: web::Query<UnlockRequest>,
     mut session: Session,
 ) -> Result<impl Responder, APIError> {
@@ -247,7 +246,7 @@ enum SubmitAmswerResponse {
 #[post("/submit_answer")]
 async fn submit_answer(
     pool: web::Data<Arc<DbPool>>,
-    cache: web::Data<Cache>,
+    cache: web::Data<Arc<Cache>>,
     form: web::Json<SubmitAnswerRequest>,
     mut session: Session,
 ) -> Result<impl Responder, APIError> {
@@ -398,7 +397,6 @@ pub struct PuzzleStatusItem {
     puzzle_id: i32,
     passed: usize,
     unlocked: usize,
-    your_status: Option<PuzzleStatus>,
 }
 
 #[derive(Debug, Serialize)]
@@ -408,28 +406,23 @@ struct PuzzleStatusResponse {
 }
 
 #[get("/puzzle_status")]
-async fn puzzle_status(
-    pool: web::Data<Arc<DbPool>>,
-    cache: web::Data<Cache>,
-    mut session: Session,
-) -> Result<impl Responder, APIError> {
+async fn puzzle_status(cache: web::Data<Arc<Cache>>) -> Result<impl Responder, APIError> {
     let location = "puzzle_status";
-    let team = allow_err(
-        get_team_id(&mut session, &pool, PRIVILEGE_MINIMAL, location).await,
-        APIError::NotInTeam,
-    );
-    let team = allow_err(team, APIError::NotLogin)?.flatten();
+    let cacheddata = cache
+        .get_stat()
+        .await
+        .map_err(|e| e.set_location(location).tap(APIError::log))?;
 
-    let updated = Utc::now().timestamp();
-
-    let data = (1..11)
-        .map(|puzzle_id| PuzzleStatusItem {
-            puzzle_id,
-            passed: 30,
-            unlocked: 230,
-            your_status: team.map(|_| PuzzleStatus::Passed),
-        })
-        .collect();
-
-    Ok(HttpResponse::Ok().json(PuzzleStatusResponse { data, updated }))
+    Ok(HttpResponse::Ok().json(PuzzleStatusResponse {
+        data: cacheddata
+            .data
+            .iter()
+            .map(|t| PuzzleStatusItem {
+                puzzle_id: t.puzzle_id,
+                passed: t.teams_passed as usize,
+                unlocked: t.teams_unlocked as usize,
+            })
+            .collect(),
+        updated: cacheddata.time.timestamp(),
+    }))
 }

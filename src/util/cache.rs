@@ -12,11 +12,17 @@ use crate::util::api_util::ERROR_DB_CONNECTION;
 
 use crate::util::auto_fetch::Expiration;
 
-use super::api_util::{log_server_error, APIError};
+use super::{
+    api_util::{log_server_error, APIError},
+    auto_fetch::MyExpiry,
+    stat::{fetch_statistic, PuzzleStatistic},
+};
 
 use crate::DbPool;
 
 use super::auto_fetch::{AutoCache, AutoCacheReadHandle, AutoCacheWriteHandle};
+
+use moka::future::Cache as MokaCache;
 
 type APICache<K, V> = AutoCache<
     K,
@@ -27,12 +33,13 @@ type APICache<K, V> = AutoCache<
 >;
 
 #[allow(clippy::type_complexity)]
-#[derive(Clone)]
 pub struct Cache {
-    pub unlock_cache: Arc<APICache<(TeamId, DecipherId), Option<i32>>>,
-    pub puzzle_cache: Arc<APICache<PuzzleId, Arc<Puzzle>>>,
-    pub time_punish_cache: Arc<APICache<(TeamId, PuzzleId), DateTime<Utc>>>,
-    pub decipher_cache: Arc<APICache<DecipherId, Arc<Decipher>>>,
+    pub unlock_cache: APICache<(TeamId, DecipherId), Option<i32>>,
+    pub puzzle_cache: APICache<PuzzleId, Arc<Puzzle>>,
+    pub time_punish_cache: APICache<(TeamId, PuzzleId), DateTime<Utc>>,
+    pub decipher_cache: APICache<DecipherId, Arc<Decipher>>,
+    pub stat: MokaCache<(), (Expiration, Arc<PuzzleStatistic>)>,
+    pool: Arc<DbPool>,
 }
 
 fn fetchdb_unlock_level(
@@ -218,27 +225,45 @@ impl Cache {
         };
 
         Self {
-            unlock_cache: Arc::new(AutoCache::new(
-                256,
-                fetch_closure_unlock,
-                write_closure_unlock,
-            )),
-            puzzle_cache: Arc::new(AutoCache::new(
+            unlock_cache: AutoCache::new(256, fetch_closure_unlock, write_closure_unlock),
+            puzzle_cache: AutoCache::new(
                 256,
                 fetch_closure_puzzle,
                 Box::new(|_, _| unimplemented!()), // Never write a puzzle
-            )),
-            time_punish_cache: Arc::new(AutoCache::new(
+            ),
+            time_punish_cache: AutoCache::new(
                 256,
                 fetch_closure_time_punish,
                 Box::new(|_, _| tokio::spawn(async { Ok(()) })), // Is written otherwise
-            )),
-            decipher_cache: Arc::new(AutoCache::new(
+            ),
+            decipher_cache: AutoCache::new(
                 256,
                 fetch_closure_decipher,
                 Box::new(|_, _| unimplemented!()), // Never write a puzzle
-            )),
+            ),
+
+            stat: MokaCache::builder()
+                .max_capacity(2)
+                .expire_after(MyExpiry)
+                .build(),
+            pool: pool.clone(),
         }
+    }
+
+    pub async fn get_stat(&self) -> Result<Arc<PuzzleStatistic>, APIError> {
+        if let Some((_, data)) = self.stat.get(&()).await {
+            return Ok(data);
+        }
+        let mut conn = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| log_server_error(e, "cache", ERROR_DB_CONNECTION))?;
+        let new_data = Arc::new(fetch_statistic(&mut conn).await?);
+        self.stat
+            .get_with((), async { (Expiration::Middle, new_data.clone()) })
+            .await;
+        Ok(new_data)
     }
 
     pub async fn query_puzzle_cached<T, F>(

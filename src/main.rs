@@ -40,7 +40,7 @@ async fn main() -> std::io::Result<()> {
     };
 
     let pool = Arc::new(pool);
-    let cache = Cache::new(pool.clone());
+    let cache = Arc::new(Cache::new(pool.clone()));
 
     HttpServer::new(move || {
         App::new()
