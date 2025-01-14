@@ -3,4 +3,5 @@
 target/*
 mnt/*
 __pycache__/*
+*/__pycache__/*
 .cargo/*
