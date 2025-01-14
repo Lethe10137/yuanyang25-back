@@ -7,7 +7,7 @@ use actix_web::{get, post, web, HttpResponse, Responder};
 use diesel::{ExpressionMethods, QueryDsl};
 use diesel_async::AsyncConnection;
 use diesel_async::RunQueryDsl;
-use log::info;
+use log::warn;
 use serde::{Deserialize, Serialize};
 
 use crate::models::Team;
@@ -212,7 +212,7 @@ async fn join_team(
                         } else if team.max_size <= team.size {
                             Ok((JoinTeamResponse::TeamFull, kill_session))
                         } else if team.is_staff && user_priv < PRIVILEGE_STAFF {
-                            info!("user priv {user_priv} too low to join a staff team");
+                            warn!("user priv {user_priv} too low to join a staff team");
                             Ok((JoinTeamResponse::AuthError, kill_session))
                         } else if cipher_util::verify_totp(team.salt.as_str(), &form.vericode) {
                             // Update the user's team reference

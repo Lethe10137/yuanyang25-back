@@ -37,6 +37,10 @@ cargo zigbuild --target x86_64-unknown-linux-gnu.2.24 --release
 mkdir -p build
 cp ./target/x86_64-unknown-linux-gnu/release/server ./build/
 
-echo "Build info" > ./build/build_info.txt
-date >> ./build/build_info.txt
-git log -1 --pretty=format:"%H %s" >> ./build/build_info.txt
+echo "Built at" $(date) > ./build/build_info.txt
+echo "      on" $(uname -s -o -r -n -m ) >> ./build/build_info.txt
+echo "    with" $(cargo --version) >> ./build/build_info.txt
+echo "     and" $(cargo-zigbuild --version) >> ./build/build_info.txt
+echo "" >>./build/build_info.txt
+echo "Git status:" >>./build/build_info.txt
+git log -1 >> ./build/build_info.txt

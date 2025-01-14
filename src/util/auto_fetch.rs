@@ -1,4 +1,4 @@
-use log::info;
+use log::{debug, info};
 use moka::future::Cache;
 use moka::notification::RemovalCause;
 use moka::Expiry;
@@ -99,20 +99,20 @@ where
 
     pub async fn get(&self, key: K) -> Result<V, E> {
         if let Some(value) = self.cache.get(&key).await {
-            info!("Got cached key {key:?} -> {}", std::any::type_name::<V>());
+            debug!("Got cached key {key:?} -> {}", std::any::type_name::<V>());
             return Ok(value.1);
         }
 
         let value_loader = self.value_loader.clone();
         let key_clone = key.clone();
 
-        info!("Fetching key {key:?} -> {}", std::any::type_name::<V>());
+        debug!("Fetching key {key:?} -> {}", std::any::type_name::<V>());
         let (value, expiry) = (value_loader)(key_clone)
             .await
             .expect("Value loader panicked")?;
 
         if expiry != Expiration::AtOnce {
-            info!(
+            debug!(
                 "Caching fetched key {key:?} -> {}",
                 std::any::type_name::<V>()
             );
@@ -130,13 +130,13 @@ where
             self.cache
                 .get_with(key.clone(), async { (expiry, value.clone()) })
                 .await;
-            info!(
+            debug!(
                 "Caching setted key {key:?} -> {}",
                 std::any::type_name::<V>()
             );
         }
 
-        info!(
+        debug!(
             "Wtring setted key {key:?} -> {}",
             std::any::type_name::<V>()
         );

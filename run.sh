@@ -1,2 +1,2 @@
 #!/bin/bash
-RUST_LOG=DEBUG MODE=prod ./build/server
+RUST_LOG=WARN MODE=prod ./build/server

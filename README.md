@@ -78,5 +78,5 @@ RUST_LOG=info MODE=dev cargo run
 1. migrate the database.
 2. `./build.sh`. The binary server will be copied into `./build`, where it is gitignored but not fcignored.
 3. set environment variables in `s.yaml` (out of this repo), for AliCloud FC. `./run.sh` will be triggered. Additional environment variables may also be set here.
-4. `cd .. && s deploy`.
+4. `(cd .. && s deploy)`.
 
