@@ -10,8 +10,10 @@ default_style = "green"
 def print(*args, style=default_style, **kwargs):
     console.print(*args, style=style, **kwargs)
 
+id =  int(input("user_id : "))
+pw = input("password: ")
 
-s = login(1, "pw1")
+s = login(id, pw)
 key = ""
     
 while True:

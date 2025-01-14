@@ -6,6 +6,7 @@ import hashlib
 import random
 
 url = "http://127.0.0.1:9000"
+# url = "https://back-sbojkjgphc.cn-beijing.fcapp.run"
 
 
 def register(openid: int, raw_pw: str) -> int:
@@ -99,8 +100,10 @@ def submit_answer(s: requests.Session, pid: int, cipher: str, answer: str):
 def info(s: requests.Session):
     res = s.get(url + "/info")
     print(res.text, res)
-    # res = s.get(url + "/puzzle_status")
-    # print(res.text, res)
+    res = s.get(url + "/puzzle_status")
+    print(res.text, res)
+    res = s.get(url + "/rank")
+    print(res.text, res)
     
 
 def prepare_users(user_cnt):

@@ -13,6 +13,8 @@ use crate::util::economy::{
 
 use actix_web::{get, post, web, HttpResponse, Responder};
 
+use chrono::{DateTime, Utc};
+use diesel::query_dsl::methods::FilterDsl;
 use diesel::ExpressionMethods;
 use diesel_async::{AsyncConnection, RunQueryDsl};
 
@@ -261,9 +263,13 @@ async fn submit_answer(
         )));
     }
 
-    let (check_result, decipher_id) = cache
+    let (check_result, decipher_id, is_meta) = cache
         .query_puzzle_cached(puzzle_id, |puzzle: &Puzzle| {
-            (puzzle.check(&form.answer), puzzle.base.decipher)
+            (
+                puzzle.check(&form.answer),
+                puzzle.base.decipher,
+                puzzle.base.meta,
+            )
         })
         .await?;
 
@@ -294,6 +300,7 @@ async fn submit_answer(
                                 puzzle.eq(puzzle_id),
                                 depth.eq(level),
                                 reward.eq(reward_tokens),
+                                meta.eq(is_meta),
                             ))
                             .on_conflict((team, puzzle, depth))
                             .do_nothing()
@@ -425,4 +432,45 @@ async fn puzzle_status(cache: web::Data<Arc<Cache>>) -> Result<impl Responder, A
             .collect(),
         updated: cacheddata.time.timestamp(),
     }))
+}
+
+#[derive(Debug, Serialize)]
+enum RankResponse {
+    Success { rank_record: i32, time: i64 },
+    NotFound,
+}
+
+#[get("/rank")]
+async fn rank(
+    mut session: Session,
+    pool: web::Data<Arc<DbPool>>,
+) -> Result<impl Responder, APIError> {
+    let location = "rank";
+
+    let team_id = get_team_id(&mut session, &pool, PRIVILEGE_MINIMAL, location).await?;
+    let mut conn = pool
+        .get()
+        .await
+        .map_err(|e| log_server_error(e, location, ERROR_DB_CONNECTION))?;
+
+    use crate::schema::final_meta_submission::dsl::*;
+    use diesel::query_dsl::methods::SelectDsl;
+    use diesel::result::Error;
+
+    let result = final_meta_submission
+        .filter(team.eq(team_id))
+        .select((id, time))
+        .first::<(i32, DateTime<Utc>)>(&mut conn)
+        .await;
+
+    let result = match result {
+        Ok((rank, record_time)) => Ok(RankResponse::Success {
+            rank_record: rank,
+            time: record_time.timestamp(),
+        }),
+        Err(Error::NotFound) => Ok(RankResponse::NotFound),
+        Err(e) => Err(log_server_error(e, location, ERROR_DB_UNKNOWN)),
+    }?;
+
+    Ok(HttpResponse::Ok().json(result))
 }

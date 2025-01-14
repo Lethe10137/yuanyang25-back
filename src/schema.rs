@@ -22,6 +22,17 @@ diesel::table! {
 }
 
 diesel::table! {
+    final_meta_submission (id) {
+        id -> Int4,
+        submission_id -> Int4,
+        team -> Int4,
+        puzzle -> Int4,
+        reward -> Int8,
+        time -> Timestamptz,
+    }
+}
+
+diesel::table! {
     oracle (id) {
         id -> Int4,
         puzzle -> Int4,
@@ -53,6 +64,7 @@ diesel::table! {
         time -> Timestamptz,
         puzzle -> Int4,
         depth -> Int4,
+        meta -> Bool,
     }
 }
 
@@ -120,6 +132,7 @@ diesel::table! {
 }
 
 diesel::joinable!(answer -> puzzle (puzzle));
+diesel::joinable!(final_meta_submission -> submission (submission_id));
 diesel::joinable!(oracle -> puzzle (puzzle));
 diesel::joinable!(oracle -> team (team));
 diesel::joinable!(submission -> puzzle (puzzle));
@@ -133,6 +146,7 @@ diesel::joinable!(wrong_answer_cnt -> team (team));
 diesel::allow_tables_to_appear_in_same_query!(
     answer,
     decipher,
+    final_meta_submission,
     oracle,
     puzzle,
     submission,

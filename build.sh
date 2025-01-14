@@ -34,6 +34,9 @@
 
 
 cargo zigbuild --target x86_64-unknown-linux-gnu.2.24 --release
-rm -r build
-mkdir build
+mkdir -p build
 cp ./target/x86_64-unknown-linux-gnu/release/server ./build/
+
+echo "Build info" > ./build/build_info.txt
+date >> ./build/build_info.txt
+git log -1 --pretty=format:"%H %s" >> ./build/build_info.txt

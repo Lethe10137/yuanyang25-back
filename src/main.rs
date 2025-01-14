@@ -63,6 +63,7 @@ async fn main() -> std::io::Result<()> {
             .service(puzzle::submit_answer)
             .service(puzzle::unlock)
             .service(puzzle::puzzle_status)
+            .service(puzzle::rank)
     })
     .bind("0.0.0.0:9000")?
     .run()
