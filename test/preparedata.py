@@ -58,6 +58,11 @@ def insert_mock_puzzle():
             INSERT INTO answer (puzzle, level, sha256)
             VALUES (%s, %s, %s)
         """)
+        
+        query3 = sql.SQL("""
+            INSERT INTO other_answer (puzzle, sha256, content)
+            VALUES (%s, %s, %s)
+        """)
 
         result = []
 
@@ -70,12 +75,17 @@ def insert_mock_puzzle():
             decipher = puzzle["decipher_id"]
             
             answers: List[str] = puzzle["expected_cipher_answer"]
+            other_answers : List[List[str]] = puzzle["other_cipher_answer_response"]
 
             cursor.execute(query1, (puzzle_id, meta, bounty, title, decipher, len(answers)))
             result.append(int(puzzle_id))
             
             for (level, answer) in enumerate(reversed(answers)):            
                 cursor.execute(query2, (puzzle_id, level, answer))
+                
+            for (sha, response) in other_answers:
+                cursor.execute(query3, (puzzle_id, sha, response))
+                
         # Commit the transaction
         conn.commit()
 

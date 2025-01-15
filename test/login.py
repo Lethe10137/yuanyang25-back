@@ -10,6 +10,7 @@ salt = "oUGdVSiysbr72t1eobDMxcY9MTRgtNB6as475eSQitA9FjOS4wkdeIJq4MnDmCJERYsotfag
 
 def get_time():
     t = int(time.time() / 60) & 0xffffffff
+    print("time", t)
     return t
     
 def get_nonce():
@@ -52,7 +53,8 @@ def get_token(version, mark, openid):
 
 if __name__ == "__main__":
     
-    url = "http://127.0.0.1:9000"
+    # url = "http://127.0.0.1:9000"
+    url = "https://back-sbojkjgphc.cn-beijing.fcapp.run"
 
     openid = 19260817
     pw ="kk2342"
@@ -70,3 +72,6 @@ if __name__ == "__main__":
     })
 
     print("Response for /register:", res.text)
+    
+    res = s.post(url + "/create_team")
+    print("Response for /create_team:", res.text)

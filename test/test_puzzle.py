@@ -33,7 +33,8 @@ while True:
         cipher = order[2]
         if cipher == "key":
             cipher = key
-        answer = order[3]
+        answer = input().strip()
+        print("[{}]".format(answer))
         print("submiting answer ", pid)
         key = submit_answer(s, pid, cipher, answer) + key
     elif order[0] == "quit":

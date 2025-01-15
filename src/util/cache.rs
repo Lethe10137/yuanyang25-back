@@ -103,6 +103,7 @@ fn fetchdb_puzzle(
     puzzle_id: PuzzleId,
 ) -> AutoCacheReadHandle<Arc<Puzzle>, APIError> {
     use crate::schema::answer::dsl as answer_dsl;
+    use crate::schema::other_answer::dsl as other_answer_dsl;
     use crate::schema::puzzle::dsl as puzzle_dsl;
 
     tokio::spawn(async move {
@@ -138,8 +139,19 @@ fn fetchdb_puzzle(
             Err(err) => Err(log_server_error(err, "cache", ERROR_DB_CONNECTION)),
         }?;
 
+        let other_answers = match other_answer_dsl::other_answer
+            .filter(other_answer_dsl::puzzle.eq(puzzle_id))
+            .select((other_answer_dsl::sha256, other_answer_dsl::content))
+            .load::<(String, String)>(&mut conn)
+            .await
+        {
+            Ok(p) => Ok(p),
+            Err(Error::NotFound) => Ok(vec![]),
+            Err(err) => Err(log_server_error(err, "cache", ERROR_DB_CONNECTION)),
+        }?;
+
         Ok((
-            Arc::new(Puzzle::new(puzzle_item, answers)),
+            Arc::new(Puzzle::new(puzzle_item, answers, other_answers)),
             Expiration::Long,
         ))
     })
@@ -225,14 +237,14 @@ impl Cache {
         };
 
         Self {
-            unlock_cache: AutoCache::new(256, fetch_closure_unlock, write_closure_unlock),
+            unlock_cache: AutoCache::new(4096, fetch_closure_unlock, write_closure_unlock),
             puzzle_cache: AutoCache::new(
-                256,
+                32,
                 fetch_closure_puzzle,
                 Box::new(|_, _| unimplemented!()), // Never write a puzzle
             ),
             time_punish_cache: AutoCache::new(
-                256,
+                4096,
                 fetch_closure_time_punish,
                 Box::new(|_, _| tokio::spawn(async { Ok(()) })), // Is written otherwise
             ),

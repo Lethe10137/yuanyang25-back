@@ -26,6 +26,7 @@ use crate::{DbPool, Ext};
 pub struct Puzzle {
     pub base: PuzzleBase,
     pub answers: HashMap<String, i32>,
+    pub other_answers: HashMap<String, String>,
 }
 
 pub enum CheckAnswerResult {
@@ -35,16 +36,26 @@ pub enum CheckAnswerResult {
         total: i32,
     },
     WrongAnswer,
+    Toast(String),
 }
 
 impl Puzzle {
-    pub fn new(base: PuzzleBase, answers: Vec<(String, i32)>) -> Self {
+    pub fn new(
+        base: PuzzleBase,
+        answers: Vec<(String, i32)>,
+        other_answers: Vec<(String, String)>,
+    ) -> Self {
         Self {
             base,
             answers: answers.into_iter().collect(),
+            other_answers: other_answers.into_iter().collect(),
         }
     }
     pub fn check(&self, submission: &str) -> CheckAnswerResult {
+        if let Some(toast) = self.other_answers.get(submission).cloned() {
+            return CheckAnswerResult::Toast(toast);
+        }
+
         match self.answers.get(submission).cloned() {
             Some(0) => CheckAnswerResult::Accepted {
                 reward_tokens: puzzle_reward(self.base.bounty),
@@ -223,7 +234,7 @@ impl APIRequest for SubmitAnswerRequest {
 }
 
 #[derive(Debug, Serialize)]
-enum SubmitAmswerResponse {
+enum SubmitAnswerResponse {
     HasSubmitted,
     Success {
         puzzle_id: i32,
@@ -237,6 +248,7 @@ enum SubmitAmswerResponse {
         try_again_after: i64,
         new_balance: i64,
     },
+    PleaseToast(String),
 }
 
 // [[API]]
@@ -258,7 +270,7 @@ async fn submit_answer(
     let puzzle_id = form.puzzle_id;
 
     if let Some(wa_penalty_until) = cache.query_wa_penalty(team_id, puzzle_id).await? {
-        return Ok(HttpResponse::Ok().json(SubmitAmswerResponse::TryAgainAfter(
+        return Ok(HttpResponse::Ok().json(SubmitAnswerResponse::TryAgainAfter(
             wa_penalty_until.timestamp(),
         )));
     }
@@ -288,6 +300,8 @@ async fn submit_answer(
         .transaction::<_, APIError, _>(|conn| {
             Box::pin(async move {
                 match check_result {
+                    CheckAnswerResult::Toast(a) => Ok(SubmitAnswerResponse::PleaseToast(a)),
+
                     CheckAnswerResult::Accepted {
                         reward_tokens,
                         level,
@@ -307,7 +321,7 @@ async fn submit_answer(
                             .execute(conn)
                             .await?;
                         if submission_result == 0 {
-                            return Ok(SubmitAmswerResponse::HasSubmitted);
+                            return Ok(SubmitAnswerResponse::HasSubmitted);
                         }
 
                         let new_balance = compulsory_team_balance(
@@ -348,7 +362,7 @@ async fn submit_answer(
                             .await?;
                         let answer = cache.decipher_cache.get(decipher_id).await?;
 
-                        Ok(SubmitAmswerResponse::Success {
+                        Ok(SubmitAnswerResponse::Success {
                             puzzle_id,
                             award_token: reward_tokens,
                             new_balance,
@@ -373,7 +387,7 @@ async fn submit_answer(
                         .map_err(Into::<APIError>::into)
                         .map_err(|e| e.set_location(location).tap(APIError::log))?;
 
-                        let result = SubmitAmswerResponse::WrongAnswer {
+                        let result = SubmitAnswerResponse::WrongAnswer {
                             try_again_after: penalty.time_penalty_until.timestamp(),
                             penalty_token: fine,
                             new_balance,

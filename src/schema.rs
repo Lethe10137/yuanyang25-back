@@ -45,6 +45,16 @@ diesel::table! {
 }
 
 diesel::table! {
+    other_answer (id) {
+        id -> Int4,
+        puzzle -> Int4,
+        #[max_length = 64]
+        sha256 -> Bpchar,
+        content -> Text,
+    }
+}
+
+diesel::table! {
     puzzle (id) {
         id -> Int4,
         meta -> Bool,
@@ -135,6 +145,7 @@ diesel::joinable!(answer -> puzzle (puzzle));
 diesel::joinable!(final_meta_submission -> submission (submission_id));
 diesel::joinable!(oracle -> puzzle (puzzle));
 diesel::joinable!(oracle -> team (team));
+diesel::joinable!(other_answer -> puzzle (puzzle));
 diesel::joinable!(submission -> puzzle (puzzle));
 diesel::joinable!(submission -> team (team));
 diesel::joinable!(transaction -> team (team));
@@ -148,6 +159,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     decipher,
     final_meta_submission,
     oracle,
+    other_answer,
     puzzle,
     submission,
     team,
