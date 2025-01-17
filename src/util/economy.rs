@@ -146,10 +146,6 @@ const HINT_DEFLATION_TIMES: f64 = 15.0;
 const HINT_BASE_TIMES: f64 = 1.0;
 const HINT_DEFLATION_DAYS: f64 = 7.0;
 
-const SKIP_DEFLATION_TIMES: f64 = 8.0;
-const SKIP_BASE_TIMES: f64 = 5.0;
-const SKIP_DEFLATION_DAYS: f64 = 7.0;
-
 const AWARD_DEFLATION_TIMES: f64 = 1.25;
 const AWARD_BASE_TIMES: f64 = 2.0;
 const AWARD_DEFLATION_DAYS: f64 = 7.0;
@@ -170,15 +166,33 @@ pub fn hint_factor() -> f64 {
     HINT_DEFLATION_TIMES.powf(1.0 - relative) * HINT_BASE_TIMES
 }
 
-// Drop from 40.0 to 5.0 in 7 days
-pub fn skip_factor() -> f64 {
-    let relative = game_start_minutes() / (SKIP_DEFLATION_DAYS * 1440.0);
-    let relative = relative.clamp(0.0, 1.0);
-    debug!(
-        "skip factor = {}",
-        SKIP_DEFLATION_TIMES.powf(1.0 - relative) * SKIP_BASE_TIMES
-    );
-    SKIP_DEFLATION_TIMES.powf(1.0 - relative) * SKIP_BASE_TIMES
+///Drops from 4.612 to 1.464 in the first 3 days, then to 1.00 in the later 4 days
+///```rust
+///
+/// use server::util::economy::skip_factor;
+///
+/// assert_eq!(skip_factor(1E8), 1.00);
+///
+/// assert_eq!(
+///     (0..=7).map(|i| i as f64 * 1440.0).map(|minutes| skip_factor(minutes)).collect::<Vec<f64>>(),
+///         vec![
+///             4.612698770601078,
+///             4.0707590159727856,
+///             3.319477079126331,
+///             1.4641000000000004,
+///             1.3310000000000004,
+///             1.2100000000000002,
+///             1.1,
+///             1.0
+///     ]);
+/// ```
+pub fn skip_factor(game_start_minutes: f64) -> f64 {
+    let relative3 = (game_start_minutes / (3.0 * 1440.0)).clamp(0.0, 1.0);
+    let relative7 = (game_start_minutes / (7.0 * 1440.0)).clamp(0.0, 1.0);
+
+    let part1 = 3.4 - 2.4_f64.powf(3.0_f64.powf(relative3 * 3.0) / 27.0);
+    let part2 = 1.1f64.powf(7.0 * (1.0 - relative7));
+    part1 * part2
 }
 
 // Rise from 0.5 to 1 in 3 days
@@ -214,7 +228,7 @@ pub fn deciper_price(pricing_type: i32, base_price: i32) -> i64 {
         //hint
         1 => (hint_factor() * base_price as f64) as i64,
         //normal skip
-        2 => (skip_factor() * base_price as f64) as i64,
+        2 => (skip_factor(game_start_minutes()) * reward_factor() * base_price as f64) as i64,
         // price of meta, mannualy priced
         _ => base_price as i64,
     };
