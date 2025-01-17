@@ -236,8 +236,8 @@ where
     }
 }
 
-static TIME_PENALTY: [i64; 11] = [10, 60, 120, 120, 120, 240, 480, 480, 480, 480, 600]; // in seconds
-static TOKEN_PENALTY: [i64; 11] = [30, 40, 50, 60, 70, 80, 90, 100, 200, 400, 500];
+static TIME_PENALTY: [i64; 11] = [21, 29, 41, 57, 80, 112, 156, 219, 306, 429, 600]; // in seconds
+static TOKEN_PENALTY: [i64; 11] = [129, 155, 186, 223, 268, 322, 386, 463, 556, 667, 800];
 
 impl Default for WaPenalty {
     fn default() -> Self {
