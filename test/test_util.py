@@ -83,6 +83,7 @@ def buy_decipher_key(s: requests.Session, did: int):
 
 def submit_answer(s: requests.Session, pid: int, cipher: str, answer: str):
     sha = hashlib.sha256((cipher + answer).encode()).hexdigest()
+    print(sha)
 
     res = s.post(
         url + "/submit_answer", json= {

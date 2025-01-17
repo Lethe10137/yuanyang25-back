@@ -236,8 +236,8 @@ where
     }
 }
 
-static TIME_PENALTY: [i64; 10] = [10, 60, 120, 120, 120, 240, 480, 480, 480, 600]; // in seconds
-static TOKEN_PENALTY: [i64; 10] = [20, 20, 20, 20, 20, 20, 20, 100, 100, 200];
+static TIME_PENALTY: [i64; 11] = [10, 60, 120, 120, 120, 240, 480, 480, 480, 480, 600]; // in seconds
+static TOKEN_PENALTY: [i64; 11] = [30, 40, 50, 60, 70, 80, 90, 100, 200, 400, 500];
 
 impl Default for WaPenalty {
     fn default() -> Self {
@@ -264,7 +264,7 @@ impl WaPenalty {
             .get(self.token_penalty_level as usize)
             .or(TOKEN_PENALTY.last())
             .cloned()
-            .unwrap_or(200);
+            .unwrap_or(500);
         self.token_penalty_level += 1;
         self.time_penalty_level += 1;
         self.time_penalty_until = Utc::now() + TimeDelta::seconds(time_penalty);

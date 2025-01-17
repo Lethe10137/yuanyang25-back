@@ -5,6 +5,7 @@ use diesel::result::Error as DieselError;
 use diesel::QueryDsl;
 use diesel_async::AsyncPgConnection;
 use diesel_async::RunQueryDsl;
+use log::debug;
 use once_cell::sync::Lazy;
 use std::cmp::max;
 use std::env;
@@ -141,12 +142,87 @@ pub fn game_start_minutes() -> f64 {
     max(0, diff.num_seconds()) as f64 / 60.0
 }
 
-pub fn puzzle_reward(base_reward: i32) -> i64 {
-    (base_reward * 2).into()
+const HINT_DEFLATION_TIMES: f64 = 15.0;
+const HINT_BASE_TIMES: f64 = 1.0;
+const HINT_DEFLATION_DAYS: f64 = 7.0;
+
+const SKIP_DEFLATION_TIMES: f64 = 8.0;
+const SKIP_BASE_TIMES: f64 = 5.0;
+const SKIP_DEFLATION_DAYS: f64 = 7.0;
+
+const AWARD_DEFLATION_TIMES: f64 = 1.25;
+const AWARD_BASE_TIMES: f64 = 2.0;
+const AWARD_DEFLATION_DAYS: f64 = 7.0;
+
+const UNLOCK_INFLATION_TIMES: f64 = 2.0;
+const UNLOCK_BASE_TIMES: f64 = 0.5;
+const UNLOCK_INFLATION_DAYS: f64 = 3.0;
+
+// Drop from 15.0 to 1.0 in 7 days
+pub fn hint_factor() -> f64 {
+    let relative = game_start_minutes() / (HINT_DEFLATION_DAYS * 1440.0);
+    let relative = relative.clamp(0.0, 1.0);
+
+    debug!(
+        "hint factor = {}",
+        HINT_DEFLATION_TIMES.powf(1.0 - relative) * HINT_BASE_TIMES
+    );
+    HINT_DEFLATION_TIMES.powf(1.0 - relative) * HINT_BASE_TIMES
+}
+
+// Drop from 40.0 to 5.0 in 7 days
+pub fn skip_factor() -> f64 {
+    let relative = game_start_minutes() / (SKIP_DEFLATION_DAYS * 1440.0);
+    let relative = relative.clamp(0.0, 1.0);
+    debug!(
+        "skip factor = {}",
+        SKIP_DEFLATION_TIMES.powf(1.0 - relative) * SKIP_BASE_TIMES
+    );
+    SKIP_DEFLATION_TIMES.powf(1.0 - relative) * SKIP_BASE_TIMES
+}
+
+// Rise from 0.5 to 1 in 3 days
+pub fn unlock_factor() -> f64 {
+    let relative = game_start_minutes() / (UNLOCK_INFLATION_DAYS * 1440.0);
+    let relative = relative.clamp(0.0, 1.0);
+    debug!(
+        "unlock factor = {}",
+        UNLOCK_INFLATION_TIMES.powf(relative) * UNLOCK_BASE_TIMES
+    );
+    UNLOCK_INFLATION_TIMES.powf(relative) * UNLOCK_BASE_TIMES
+}
+
+// Drop from 2.5 to 2.0 in 7 days
+pub fn reward_factor() -> f64 {
+    let relative = game_start_minutes() / (AWARD_DEFLATION_DAYS * 1440.0);
+    let relative = relative.clamp(0.0, 1.0);
+    debug!(
+        "awrad factor = {}",
+        AWARD_DEFLATION_TIMES.powf(1.0 - relative) * AWARD_BASE_TIMES
+    );
+    AWARD_DEFLATION_TIMES.powf(1.0 - relative) * AWARD_BASE_TIMES
+}
+
+pub fn puzzle_reward(base_reward: i32, factor: f64) -> i64 {
+    (base_reward as f64 * reward_factor() * factor) as i64
 }
 
 pub fn deciper_price(pricing_type: i32, base_price: i32) -> i64 {
-    (base_price * (1 + pricing_type)) as i64
+    let result = match pricing_type {
+        //normal unlock
+        0 => (unlock_factor() * base_price as f64) as i64,
+        //hint
+        1 => (hint_factor() * base_price as f64) as i64,
+        //normal skip
+        2 => (skip_factor() * base_price as f64) as i64,
+        // price of meta, mannualy priced
+        _ => base_price as i64,
+    };
+    debug!(
+        "type = {}, base = {}, result = {}",
+        pricing_type, base_price, result
+    );
+    result
 }
 
 pub fn time_allowance() -> i64 {

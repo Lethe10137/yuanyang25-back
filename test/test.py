@@ -1,8 +1,8 @@
 import requests
 import hashlib
 
-# url = "https://back-sbojkjgphc.cn-beijing.fcapp.run"
-url = "http://127.0.0.1:9000"
+url = "https://back-sbojkjgphc.cn-beijing.fcapp.run"
+# url = "http://127.0.0.1:9000"
 
 
 import token_generator

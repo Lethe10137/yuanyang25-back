@@ -56,14 +56,19 @@ impl Puzzle {
             return CheckAnswerResult::Toast(toast);
         }
 
+        let (final_factor, each_step) = match self.base.depth {
+            1 => (1.0, 0.0),
+            i => (0.8, 0.2 / (i as f64 - 1.0)),
+        };
+
         match self.answers.get(submission).cloned() {
             Some(0) => CheckAnswerResult::Accepted {
-                reward_tokens: puzzle_reward(self.base.bounty),
+                reward_tokens: puzzle_reward(self.base.bounty, final_factor),
                 level: 0,
                 total: self.base.depth,
             },
             Some(level) => CheckAnswerResult::Accepted {
-                reward_tokens: 0,
+                reward_tokens: puzzle_reward(self.base.bounty, each_step),
                 level,
                 total: self.base.depth,
             },
@@ -241,6 +246,7 @@ enum SubmitAnswerResponse {
         award_token: i64,
         new_balance: i64,
         key: String,
+        finish: bool,
     },
     TryAgainAfter(i64),
     WrongAnswer {
@@ -367,6 +373,7 @@ async fn submit_answer(
                             award_token: reward_tokens,
                             new_balance,
                             key: answer.get_key(level),
+                            finish: level == 0,
                         })
                     }
 
