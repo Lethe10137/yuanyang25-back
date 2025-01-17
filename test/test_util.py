@@ -4,9 +4,24 @@ import time
 import requests
 import hashlib
 import random
+import os
 
 url = "http://127.0.0.1:9000"
-# url = "https://back-sbojkjgphc.cn-beijing.fcapp.run"
+
+try:
+    url = os.environ['SERVER']
+except KeyError:
+
+    with open(".env", "r") as f:
+        for line in f:
+            try:
+                name, value = line.strip().split("=")
+                if(name == "SERVER"):
+                    url = value
+            except:
+                pass
+
+print(url)
 
 
 def register(openid: int, raw_pw: str) -> int:
