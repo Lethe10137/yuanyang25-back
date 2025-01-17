@@ -8,7 +8,7 @@ use actix_web::{web, App, HttpServer};
 use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
 use diesel_async::AsyncPgConnection;
 
-use server::api::{puzzle, register, team};
+use server::api::{monitor, puzzle, register, team};
 use server::util::{cache::Cache, cipher_util};
 
 use actix_session::{storage::CookieSessionStore, SessionMiddleware};
@@ -64,6 +64,7 @@ async fn main() -> std::io::Result<()> {
             .service(puzzle::unlock)
             .service(puzzle::puzzle_status)
             .service(puzzle::rank)
+            .service(monitor::cache_size)
     })
     .bind("0.0.0.0:9000")?
     .run()

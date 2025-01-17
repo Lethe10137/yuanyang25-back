@@ -69,6 +69,7 @@ where
     G: Fn(K, V) -> AutoCacheWriteHandle<E> + Send + Sync + 'static, // write into db
 {
     cache: Cache<K, (Expiration, V)>,
+    capacity: usize,
     value_loader: Arc<F>,
     value_writer: Arc<G>,
 }
@@ -92,9 +93,14 @@ where
                 .expire_after(MyExpiry)
                 .eviction_listener(eviction_listener)
                 .build(),
+            capacity,
             value_loader: Arc::new(value_loader),
             value_writer: Arc::new(value_writer),
         }
+    }
+
+    pub fn size(&self) -> (usize, usize) {
+        (self.cache.weighted_size() as usize, self.capacity)
     }
 
     pub async fn get(&self, key: K) -> Result<V, E> {

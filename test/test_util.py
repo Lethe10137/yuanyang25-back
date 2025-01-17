@@ -5,8 +5,8 @@ import requests
 import hashlib
 import random
 
-# url = "http://127.0.0.1:9000"
-url = "https://back-sbojkjgphc.cn-beijing.fcapp.run"
+url = "http://127.0.0.1:9000"
+# url = "https://back-sbojkjgphc.cn-beijing.fcapp.run"
 
 
 def register(openid: int, raw_pw: str) -> int:

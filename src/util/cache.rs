@@ -42,6 +42,14 @@ pub struct Cache {
     pool: Arc<DbPool>,
 }
 
+#[derive(Debug, serde::Serialize)]
+pub struct CacheStatusResponse {
+    unlock: (usize, usize),
+    puzzle: (usize, usize),
+    time_punish: (usize, usize),
+    decipher: (usize, usize),
+}
+
 fn fetchdb_unlock_level(
     pool: Arc<DbPool>,
     key: (TeamId, DecipherId),
@@ -259,6 +267,15 @@ impl Cache {
                 .expire_after(MyExpiry)
                 .build(),
             pool: pool.clone(),
+        }
+    }
+
+    pub fn get_size(&self) -> CacheStatusResponse {
+        CacheStatusResponse {
+            unlock: self.unlock_cache.size(),
+            puzzle: self.puzzle_cache.size(),
+            time_punish: self.time_punish_cache.size(),
+            decipher: self.decipher_cache.size(),
         }
     }
 
