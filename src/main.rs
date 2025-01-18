@@ -49,14 +49,15 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(cache.clone()))
             .wrap(
                 Cors::default()
-                    .allow_any_origin()
-                    .allowed_methods(vec!["GET", "POST", "PUT", "DELETE", "PATCH"])
-                    .allowed_headers(vec!["Content-Type", "Authorization"])
+                    .allowed_origin("https://2025.yuanyang.app")
+                    .allow_any_header()
+                    .allow_any_method()
                     .supports_credentials(),
             )
             .wrap(
                 SessionMiddleware::builder(CookieSessionStore::default(), secret_key.clone())
-                    .cookie_secure(is_production) //  cookie_secure disabled under development mode.
+                    .cookie_secure(is_production) // 在生产环境下使用 `Secure`，在开发模式下可以禁用
+                    .cookie_same_site(actix_web::cookie::SameSite::None) // 设置 SameSite=None 以支持跨站点请求
                     .build(),
             )
             .service(register::register_user)
