@@ -93,7 +93,8 @@ impl APIRequest for DecipherKeyRequest {
 #[derive(Debug, Serialize)]
 enum DecipherKeyResponse {
     // returns the decipher key!.
-    Success(String),
+    Full(String),
+    Part(String),
     Price(i64),
 }
 
@@ -117,10 +118,10 @@ async fn decipher_key(
     let decipher_id = form.decipher_id;
     let answer = cache.decipher_cache.get(decipher_id).await?;
 
-    let result = if let Some(level) = cache.unlock_cache.get((team_id, decipher_id)).await? {
-        DecipherKeyResponse::Success(answer.get_key(level))
-    } else {
-        DecipherKeyResponse::Price(deciper_price(answer.pricing_type, answer.base_price))
+    let result = match cache.unlock_cache.get((team_id, decipher_id)).await? {
+        Some(0) => DecipherKeyResponse::Full(answer.get_key(0)),
+        Some(i) => DecipherKeyResponse::Part(answer.get_key(i)),
+        None => DecipherKeyResponse::Price(deciper_price(answer.pricing_type, answer.base_price)),
     };
 
     Ok(HttpResponse::Ok().json(result))
