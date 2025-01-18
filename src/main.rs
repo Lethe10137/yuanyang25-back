@@ -3,6 +3,7 @@ extern crate dotenv;
 
 use std::sync::Arc;
 
+use actix_cors::Cors;
 use actix_web::{web, App, HttpServer};
 
 use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
@@ -46,6 +47,13 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(web::Data::new(pool.clone()))
             .app_data(web::Data::new(cache.clone()))
+            .wrap(
+                Cors::default()
+                    .allow_any_origin()
+                    .allowed_methods(vec!["GET", "POST", "PUT", "DELETE", "PATCH"])
+                    .allowed_headers(vec!["Content-Type", "Authorization"])
+                    .supports_credentials(),
+            )
             .wrap(
                 SessionMiddleware::builder(CookieSessionStore::default(), secret_key.clone())
                     .cookie_secure(is_production) //  cookie_secure disabled under development mode.
