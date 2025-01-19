@@ -4,6 +4,8 @@ extern crate dotenv;
 use std::sync::Arc;
 
 use actix_cors::Cors;
+use actix_web::dev::RequestHead;
+use actix_web::http::header::HeaderValue;
 use actix_web::{web, App, HttpServer};
 
 use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
@@ -15,6 +17,19 @@ use server::util::{cache::Cache, cipher_util};
 use actix_session::{storage::CookieSessionStore, SessionMiddleware};
 use log::warn;
 use server::DbPool;
+
+fn cors_check(head: &HeaderValue, _: &RequestHead) -> bool {
+    if let Ok(origin) = head.to_str() {
+        match origin {
+            "https://2025.yuanyang.app" => true,
+            "https://yuanyang.app" => true,
+            "http://localhost:5173" => true,
+            url => url.ends_with("yuanyang25-front.netlify.app"), // for deploy preview
+        }
+    } else {
+        false
+    }
+}
 
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
@@ -49,7 +64,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(cache.clone()))
             .wrap(
                 Cors::default()
-                    .allowed_origin("https://2025.yuanyang.app")
+                    .allowed_origin_fn(cors_check)
                     .allow_any_header()
                     .allow_any_method()
                     .supports_credentials(),
