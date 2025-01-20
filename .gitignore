@@ -5,3 +5,4 @@ mnt/*
 __pycache__/*
 */__pycache__/*
 .cargo/*
+migrate_all.sh

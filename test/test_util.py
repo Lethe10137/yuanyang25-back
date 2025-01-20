@@ -8,18 +8,18 @@ import os
 
 url = "http://127.0.0.1:9000"
 
-try:
-    url = os.environ['SERVER']
-except KeyError:
+# try:
+#     url = os.environ['SERVER']
+# except KeyError:
 
-    with open(".env", "r") as f:
-        for line in f:
-            try:
-                name, value = line.strip().split("=")
-                if(name == "SERVER"):
-                    url = value
-            except:
-                pass
+#     with open(".env", "r") as f:
+#         for line in f:
+#             try:
+#                 name, value = line.strip().split("=")
+#                 if(name == "SERVER"):
+#                     url = value
+#             except:
+#                 pass
 
 print(url)
 
@@ -150,4 +150,39 @@ def prepare_users(user_cnt):
     return users
 
         
+def create_oracle(s: requests.Session, puzzle_id: int,content: str):
+    res = s.post(
+        url + "/create_oracle", json= {
+            "puzzle_id" : puzzle_id,
+            "content" : content
+        }
+    )
+    print(res.text, res)
+    
+def reply_oracle(s: requests.Session, oracle_id: int,refund:int,content: str):
+    res = s.post(
+        url + "/staff_reply_oracle", json= {
+            "oracle_id" : oracle_id,
+            "refund_amount": refund,
+            "content" : content
+        }
+    )
+    print(res.text, res)
 
+def get_oracle(s: requests.Session, oracle_id: int):
+    res = s.get(
+        url + "/get_oracle?oracle_id={}".format(oracle_id), 
+    )
+    print(res.text, res)
+
+def check_oracle(s: requests.Session, puzzle_id: int):
+    res = s.get(
+        url + "/check_oracle?puzzle_id={}".format(puzzle_id), 
+    )
+    print(res.text, res)
+
+def list_oracle(s: requests.Session, start_id: int):
+    res = s.get(
+        url + "/staff_list_oracle?start_oracle_id={}&limit=10".format(start_id), 
+    )
+    print(res.text, res)

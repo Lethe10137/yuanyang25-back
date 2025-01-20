@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
+use serde::Serialize;
 
 pub type TeamId = i32;
 pub type PuzzleId = i32;
@@ -63,4 +64,54 @@ pub struct Decipher {
     pub base_price: i32,
     pub depth: i32,
     pub root: String,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = crate::schema::oracle)]
+pub struct NewOracle<'a> {
+    pub puzzle: i32,
+    pub team: i32,
+    pub cost: i64,
+    pub query: &'a str,
+    pub response: &'a str,
+    pub active: bool,
+}
+
+#[derive(Queryable, Serialize)]
+#[diesel(table_name = crate::schema::oracle)]
+pub struct OracleRecord {
+    pub id: i32,
+    pub puzzle: i32,
+    pub team: i32,
+    pub active: bool,
+    pub cost: i64,
+    pub refund: i64,
+    pub query: String,
+    pub response: String,
+}
+
+#[derive(Queryable, Serialize)]
+#[diesel(table_name = crate::schema::oracle)]
+pub struct OracleSummary {
+    pub id: i32,
+    pub active: bool,
+}
+
+#[derive(Queryable, Serialize)]
+#[diesel(table_name = crate::schema::oracle)]
+pub struct OracleSummaryStaff {
+    pub id: i32,
+    pub active: bool,
+    pub cost: i64,
+    pub refund: i64,
+    pub team: i32,
+    pub puzzle: i32,
+}
+
+#[derive(AsChangeset)]
+#[diesel(table_name = crate::schema::oracle)]
+pub struct UpdateOracle {
+    pub refund: Option<i64>,
+    pub active: Option<bool>,
+    pub response: Option<String>,
 }

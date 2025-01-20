@@ -242,3 +242,7 @@ pub fn deciper_price(pricing_type: i32, base_price: i32) -> i64 {
 pub fn time_allowance() -> i64 {
     (game_start_minutes() * 25.0) as i64
 }
+
+pub fn oracle_price() -> i64 {
+    8888
+}

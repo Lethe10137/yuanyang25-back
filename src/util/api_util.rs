@@ -12,11 +12,7 @@ use diesel::result::Error;
 use derive_more::derive::Display;
 use diesel::prelude::*;
 
-use crate::{
-    models::{PuzzleId, Team, TeamId, User, WaPenalty},
-    util::economy::time_allowance,
-    DbPool, Ext,
-};
+use crate::{models::*, util::economy::time_allowance, DbPool, Ext};
 use log::error;
 
 use diesel_async::AsyncPgConnection;
@@ -355,6 +351,129 @@ where
         .map_err(|e| new_unlocated_server_error(e, ERROR_DB_UNKNOWN))?;
 
     Ok(())
+}
+
+pub async fn get_oracle_by_id_and_team<C>(
+    oracle_id: i32,
+    team_id: i32,
+    conn: &mut C,
+) -> Result<Option<OracleRecord>, Error>
+where
+    C: DerefMut<Target = AsyncPgConnection> + Send,
+{
+    use crate::schema::oracle::dsl::*;
+
+    let record = oracle
+        .filter(team.eq(team_id).and(id.eq(oracle_id)))
+        .select((id, puzzle, team, active, cost, refund, query, response))
+        .first::<OracleRecord>(conn)
+        .await
+        .optional()?; // 使用 `optional()` 返回 `None` 如果没有记录
+
+    Ok(record)
+}
+
+pub async fn get_oracle_by_id<C>(
+    oracle_id: i32,
+    conn: &mut C,
+) -> Result<Option<OracleRecord>, Error>
+where
+    C: DerefMut<Target = AsyncPgConnection> + Send,
+{
+    use crate::schema::oracle::dsl::*;
+
+    let record = oracle
+        .filter(id.eq(oracle_id))
+        .select((id, puzzle, team, active, cost, refund, query, response))
+        .first::<OracleRecord>(conn)
+        .await
+        .optional()?; // 使用 `optional()` 返回 `None` 如果没有记录
+
+    Ok(record)
+}
+
+pub async fn get_oracles_by_team_and_puzzle<C>(
+    team_id: i32,
+    puzzle_id: i32,
+    conn: &mut C,
+) -> Result<Vec<OracleSummary>, Error>
+where
+    C: DerefMut<Target = AsyncPgConnection> + Send,
+{
+    use crate::schema::oracle::dsl::*;
+
+    let oracles = oracle
+        .filter(team.eq(team_id).and(puzzle.eq(puzzle_id)))
+        .select((id, active))
+        .load::<OracleSummary>(conn)
+        .await?;
+
+    Ok(oracles)
+}
+
+pub async fn get_oracles_from_id<C>(
+    oracle_id: i32,
+    conn: &mut C,
+    limit: usize,
+) -> Result<Vec<OracleSummaryStaff>, Error>
+where
+    C: DerefMut<Target = AsyncPgConnection> + Send,
+{
+    use crate::schema::oracle::dsl::*;
+
+    let oracles = oracle
+        .filter(id.ge(oracle_id))
+        .select((id, active, cost, refund, team, puzzle))
+        .order(id.asc())
+        .limit(limit as i64)
+        .load::<OracleSummaryStaff>(conn)
+        .await?;
+
+    Ok(oracles)
+}
+
+use diesel::sql_types::{BigInt, Integer, Text};
+
+use diesel::QueryableByName;
+
+#[derive(QueryableByName)]
+pub struct OracleUpdateResult {
+    #[diesel(sql_type = Integer)]
+    team: i32,
+    #[diesel(sql_type = BigInt)]
+    refund: i64,
+}
+
+pub async fn update_active_oracle_and_return_team<C>(
+    id: i32,
+    refund_value: i64,
+    response_value: String,
+    conn: &mut C,
+) -> Result<Option<(i32, i64)>, Error>
+where
+    C: DerefMut<Target = AsyncPgConnection> + Send,
+{
+    // SQL 查询，包含 RETURNING 子句
+    let query = "
+        UPDATE oracle
+        SET 
+            refund = LEAST($1, cost), 
+            response = $2,    
+            active = false                
+        WHERE id = $3 AND active = true
+        RETURNING team, refund;
+    ";
+
+    // 执行 SQL 查询并获取返回的 `team` 字段
+    let result = diesel::sql_query(query)
+        .bind::<BigInt, _>(refund_value) // 绑定 refund_value
+        .bind::<Text, _>(response_value) // 绑定 response_value
+        .bind::<Integer, _>(id) // 绑定 id
+        .get_results::<OracleUpdateResult>(conn) // 获取返回的 `team` 字段
+        .await?;
+
+    #[allow(clippy::get_first)]
+    Ok(result.get(0).map(|i| (i.team, i.refund)))
 }
 
 pub fn log_server_error<E>(error: E, location: &'static str, msg: &'static str) -> APIError

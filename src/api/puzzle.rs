@@ -112,7 +112,7 @@ async fn decipher_key(
     mut session: Session,
 ) -> Result<impl Responder, APIError> {
     let location = "decipher_key";
-
+    form.sanity()?;
     let team_id = get_team_id(&mut session, &pool, PRIVILEGE_MINIMAL, location).await?;
 
     let decipher_id = form.decipher_id;
@@ -162,7 +162,7 @@ async fn unlock(
     mut session: Session,
 ) -> Result<impl Responder, APIError> {
     let location = "unlock";
-
+    form.sanity()?;
     let team_id = get_team_id(&mut session, &pool, PRIVILEGE_MINIMAL, location).await?;
 
     let decipher_id = form.decipher_id;
@@ -272,7 +272,9 @@ async fn submit_answer(
     mut session: Session,
 ) -> Result<impl Responder, APIError> {
     let location = "submit_answer";
+    form.sanity()?;
     let team_id = get_team_id(&mut session, &pool, PRIVILEGE_MINIMAL, location).await?;
+    let is_staff = user_privilege_check(&session, PRIVILEGE_STAFF).is_ok();
 
     let puzzle_id = form.puzzle_id;
 
@@ -282,7 +284,7 @@ async fn submit_answer(
         )));
     }
 
-    let (check_result, decipher_id, is_meta) = cache
+    let (check_result, decipher_id, mut is_meta) = cache
         .query_puzzle_cached(puzzle_id, |puzzle: &Puzzle| {
             (
                 puzzle.check(&form.answer),
@@ -291,6 +293,11 @@ async fn submit_answer(
             )
         })
         .await?;
+
+    // Meta submitted by a staff is not counted in the rank.
+    if is_staff {
+        is_meta = false;
+    }
 
     let old_level = if let Some(level) = cache.unlock_cache.get((team_id, decipher_id)).await? {
         level

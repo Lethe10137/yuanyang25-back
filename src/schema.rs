@@ -41,6 +41,7 @@ diesel::table! {
         refund -> Int8,
         query -> Text,
         response -> Text,
+        active -> Bool,
     }
 }
 
