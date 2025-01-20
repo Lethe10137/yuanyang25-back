@@ -78,6 +78,7 @@ async fn main() -> std::io::Result<()> {
             .service(register::register_user)
             .service(register::get_user)
             .service(register::login_user)
+            .service(register::logout)
             .service(team::create_team)
             .service(team::team_veri)
             .service(team::join_team)

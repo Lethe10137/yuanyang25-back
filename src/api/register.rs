@@ -211,6 +211,12 @@ async fn login_user(
     Ok(HttpResponse::Ok().json(result))
 }
 
+#[get("/logout")]
+async fn logout(session: Session) -> Result<impl Responder, APIError> {
+    session.clear();
+    Ok(HttpResponse::Ok())
+}
+
 // For debug only!
 #[get("/user")]
 async fn get_user(session: Session) -> impl Responder {
