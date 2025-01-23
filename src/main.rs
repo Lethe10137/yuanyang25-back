@@ -72,7 +72,11 @@ async fn main() -> std::io::Result<()> {
             .wrap(
                 SessionMiddleware::builder(CookieSessionStore::default(), secret_key.clone())
                     .cookie_secure(is_production) // 在生产环境下使用 `Secure`，在开发模式下可以禁用
-                    .cookie_same_site(actix_web::cookie::SameSite::None) // 设置 SameSite=None 以支持跨站点请求
+                    .cookie_same_site(if is_production {
+                        actix_web::cookie::SameSite::None
+                    } else {
+                        actix_web::cookie::SameSite::Lax
+                    }) // 设置 SameSite=None 以支持跨站点请求
                     .build(),
             )
             .service(register::register_user)

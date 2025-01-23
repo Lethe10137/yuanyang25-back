@@ -26,7 +26,7 @@ use crate::{DbPool, Ext};
 pub struct Puzzle {
     pub base: PuzzleBase,
     pub answers: HashMap<String, i32>,
-    pub other_answers: HashMap<String, String>,
+    pub other_answers: HashMap<String, (i32, String)>, //(other_answer_id, response)
 }
 
 pub enum CheckAnswerResult {
@@ -36,14 +36,14 @@ pub enum CheckAnswerResult {
         total: i32,
     },
     WrongAnswer,
-    Toast(String),
+    Toast((i32, String)),
 }
 
 impl Puzzle {
     pub fn new(
         base: PuzzleBase,
         answers: Vec<(String, i32)>,
-        other_answers: Vec<(String, String)>,
+        other_answers: Vec<(String, (i32, String))>,
     ) -> Self {
         Self {
             base,
@@ -52,8 +52,8 @@ impl Puzzle {
         }
     }
     pub fn check(&self, submission: &str) -> CheckAnswerResult {
-        if let Some(toast) = self.other_answers.get(submission).cloned() {
-            return CheckAnswerResult::Toast(toast);
+        if let Some((id, toast)) = self.other_answers.get(submission).cloned() {
+            return CheckAnswerResult::Toast((id, toast));
         }
 
         let (final_factor, each_step) = match self.base.depth {
@@ -241,7 +241,7 @@ impl APIRequest for SubmitAnswerRequest {
 
 #[derive(Debug, Serialize)]
 enum SubmitAnswerResponse {
-    HasSubmitted,
+    HasSubmitted(String),
     Success {
         puzzle_id: i32,
         award_token: i64,
@@ -314,8 +314,17 @@ async fn submit_answer(
         .transaction::<_, APIError, _>(|conn| {
             Box::pin(async move {
                 match check_result {
-                    CheckAnswerResult::Toast(a) => Ok(SubmitAnswerResponse::PleaseToast(a)),
-
+                    CheckAnswerResult::Toast((ref_id, content)) => {
+                        use crate::schema::other_answer_submission::dsl::*;
+                        //log the submission
+                        diesel::insert_into(other_answer_submission)
+                            .values((team.eq(team_id), other_answer.eq(ref_id)))
+                            .on_conflict((team, other_answer))
+                            .do_nothing()
+                            .execute(conn)
+                            .await?;
+                        Ok(SubmitAnswerResponse::PleaseToast(content))
+                    }
                     CheckAnswerResult::Accepted {
                         reward_tokens,
                         level,
@@ -335,7 +344,15 @@ async fn submit_answer(
                             .execute(conn)
                             .await?;
                         if submission_result == 0 {
-                            return Ok(SubmitAnswerResponse::HasSubmitted);
+                            if level == 0 {
+                                return Ok(SubmitAnswerResponse::HasSubmitted(
+                                    "正确答案, 但已经提交过。".to_string(),
+                                ));
+                            } else {
+                                return Ok(SubmitAnswerResponse::HasSubmitted(
+                                    "正确中间答案, 但已经提交过。".to_string(),
+                                ));
+                            }
                         }
 
                         let new_balance = compulsory_team_balance(

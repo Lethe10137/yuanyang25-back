@@ -52,6 +52,17 @@ diesel::table! {
         #[max_length = 64]
         sha256 -> Bpchar,
         content -> Text,
+        #[sql_name = "ref"]
+        ref_ -> Int4,
+    }
+}
+
+diesel::table! {
+    other_answer_submission (id) {
+        id -> Int4,
+        team -> Int4,
+        other_answer -> Int4,
+        time -> Timestamptz,
     }
 }
 
@@ -147,6 +158,8 @@ diesel::joinable!(final_meta_submission -> submission (submission_id));
 diesel::joinable!(oracle -> puzzle (puzzle));
 diesel::joinable!(oracle -> team (team));
 diesel::joinable!(other_answer -> puzzle (puzzle));
+diesel::joinable!(other_answer_submission -> other_answer (other_answer));
+diesel::joinable!(other_answer_submission -> team (team));
 diesel::joinable!(submission -> puzzle (puzzle));
 diesel::joinable!(submission -> team (team));
 diesel::joinable!(transaction -> team (team));
@@ -161,6 +174,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     final_meta_submission,
     oracle,
     other_answer,
+    other_answer_submission,
     puzzle,
     submission,
     team,

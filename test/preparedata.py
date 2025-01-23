@@ -60,8 +60,8 @@ def insert_mock_puzzle():
         """)
         
         query3 = sql.SQL("""
-            INSERT INTO other_answer (puzzle, sha256, content)
-            VALUES (%s, %s, %s)
+            INSERT INTO other_answer (puzzle, sha256, content, ref)
+            VALUES (%s, %s, %s, %s)
         """)
 
         result = []
@@ -83,8 +83,8 @@ def insert_mock_puzzle():
             for (level, answer) in enumerate(reversed(answers)):            
                 cursor.execute(query2, (puzzle_id, level, answer))
                 
-            for (sha, response) in other_answers:
-                cursor.execute(query3, (puzzle_id, sha, response))
+            for (ref, (sha, response)) in enumerate(other_answers):
+                cursor.execute(query3, (puzzle_id, sha, response, ref))
                 
         # Commit the transaction
         conn.commit()
@@ -136,6 +136,8 @@ if __name__ == "__main__":
     
     insert_mock_puzzle()
     insert_decipher()
+    
+    exit(0)
     
     users = test_util.prepare_users(NUM_TEAMS * 3)
     s = test_util.login(users[0]["id"], users[0]["pw"])

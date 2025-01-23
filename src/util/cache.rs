@@ -149,8 +149,12 @@ fn fetchdb_puzzle(
 
         let other_answers = match other_answer_dsl::other_answer
             .filter(other_answer_dsl::puzzle.eq(puzzle_id))
-            .select((other_answer_dsl::sha256, other_answer_dsl::content))
-            .load::<(String, String)>(&mut conn)
+            .select((
+                other_answer_dsl::sha256,
+                other_answer_dsl::content,
+                other_answer_dsl::id,
+            ))
+            .load::<(String, String, i32)>(&mut conn)
             .await
         {
             Ok(p) => Ok(p),
@@ -159,7 +163,14 @@ fn fetchdb_puzzle(
         }?;
 
         Ok((
-            Arc::new(Puzzle::new(puzzle_item, answers, other_answers)),
+            Arc::new(Puzzle::new(
+                puzzle_item,
+                answers,
+                other_answers
+                    .into_iter()
+                    .map(|(sha, content, refnum)| (sha, (refnum, content)))
+                    .collect(),
+            )),
             Expiration::Long,
         ))
     })
