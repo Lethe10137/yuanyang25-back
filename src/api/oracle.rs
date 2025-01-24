@@ -34,9 +34,11 @@ struct CreateOracleRequest {
     content: String,
 }
 
+const ORACLE_LENGTH_LIMIT_BYTES: usize = 700;
+
 impl APIRequest for CreateOracleRequest {
     fn ok(&self) -> bool {
-        self.puzzle_id >= 0 && self.content.len() <= 200
+        self.puzzle_id >= 0 && self.content.len() <= ORACLE_LENGTH_LIMIT_BYTES
     }
 }
 
@@ -277,7 +279,7 @@ struct ReplyOracleRequest {
 
 impl APIRequest for ReplyOracleRequest {
     fn ok(&self) -> bool {
-        self.oracle_id >= 0 && self.content.len() <= 200
+        self.oracle_id >= 0 && self.content.len() <= ORACLE_LENGTH_LIMIT_BYTES
     }
 }
 
