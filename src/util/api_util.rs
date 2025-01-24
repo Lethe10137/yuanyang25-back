@@ -31,31 +31,31 @@ pub trait APIRequest: Sized {
 
 #[derive(Debug, Display, PartialEq, Eq)]
 pub enum APIError {
-    #[display("Invalid form data")]
+    #[display("请求格式或字段长度不正确")]
     InvalidFormData,
 
-    #[display("Invalid query")]
+    #[display("请求参数不正确")]
     InvalidQuery,
 
-    #[display("Invalid session")]
+    #[display("Cookie 不合法")]
     InvalidSession,
 
-    #[display("Not logged in")]
+    #[display("未登录")]
     NotLogin,
 
-    #[display("Not in a team")]
+    #[display("不在队伍中")]
     NotInTeam,
 
-    #[display("Insufficient Token")]
+    #[display("余额不足")]
     InsufficientTokens,
 
-    #[display("Unauthorized access")]
+    #[display("权限不足")]
     Unauthorized,
 
-    #[display("Transaction cancelled, balance matained as {balance}")]
+    #[display("交易未执行，当前余额 {balance}")]
     TransactionCancel { balance: i64 },
 
-    #[display("Server error at {location}, ref[{refnum}]: {msg}")]
+    #[display("服务器内部错误： {location}, ref[{refnum}]: {msg}")]
     ServerError {
         location: &'static str,
         msg: &'static str,
