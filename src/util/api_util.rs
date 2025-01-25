@@ -432,6 +432,22 @@ where
     Ok(oracles)
 }
 
+pub async fn find_min_active_id<C>(conn: &mut C) -> QueryResult<Option<i32>>
+where
+    C: DerefMut<Target = AsyncPgConnection> + Send,
+{
+    use crate::schema::oracle::dsl::*;
+
+    let result = oracle
+        .filter(active.eq(true)) // 过滤active为true
+        .select(id)
+        .order(id.asc()) // 按照id升序排列
+        .first::<i32>(conn)
+        .await?;
+
+    Ok(Some(result))
+}
+
 use diesel::sql_types::{BigInt, Integer, Text};
 
 use diesel::QueryableByName;

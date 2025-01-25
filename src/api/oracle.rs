@@ -12,9 +12,9 @@ use diesel_async::{AsyncConnection, RunQueryDsl};
 use serde::{Deserialize, Serialize};
 
 use crate::util::api_util::{
-    get_oracle_by_id, get_oracle_by_id_and_team, get_oracles_by_team_and_puzzle,
-    get_oracles_from_id, update_active_oracle_and_return_team, user_privilege_check,
-    PRIVILEGE_STAFF,
+    find_min_active_id, get_oracle_by_id, get_oracle_by_id_and_team,
+    get_oracles_by_team_and_puzzle, get_oracles_from_id, update_active_oracle_and_return_team,
+    user_privilege_check, PRIVILEGE_STAFF,
 };
 use crate::{
     util::{
@@ -268,6 +268,36 @@ async fn staff_list_oracle(
     let oracles = get_oracles_from_id(start_oracle_id, &mut conn, limit).await?;
 
     Ok(HttpResponse::Ok().json(ListOracleResponse { oracles }))
+}
+
+#[derive(Serialize)]
+enum WorkFromResponse {
+    Start(i32),
+    Nothing(&'static str),
+}
+
+#[get("/staff_work_from")]
+async fn staff_work_from(
+    pool: web::Data<Arc<DbPool>>,
+    session: Session,
+) -> Result<impl Responder, APIError> {
+    let location = "staff_work_from";
+
+    user_privilege_check(&session, PRIVILEGE_STAFF)?;
+
+    let mut conn = pool
+        .get()
+        .await
+        .map_err(|e| log_server_error(e, location, ERROR_DB_CONNECTION))?;
+
+    let result = find_min_active_id(&mut conn).await?;
+
+    let result = match result {
+        Some(i) => WorkFromResponse::Start(i),
+        _ => WorkFromResponse::Nothing("All clear!"),
+    };
+
+    Ok(HttpResponse::Ok().json(result))
 }
 
 #[derive(Debug, Deserialize)]

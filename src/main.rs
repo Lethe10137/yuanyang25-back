@@ -99,6 +99,7 @@ async fn main() -> std::io::Result<()> {
             .service(oracle::check_oracle)
             .service(oracle::staff_list_oracle)
             .service(oracle::staff_reply_oracle)
+            .service(oracle::staff_work_from)
     })
     .bind("0.0.0.0:9000")?
     .run()
