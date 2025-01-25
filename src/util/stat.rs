@@ -35,7 +35,7 @@ where
         SELECT 
             p.id AS puzzle_id,
             p.decipher,
-            COALESCE(SUM(CASE WHEN s.depth = 0 THEN 1 ELSE 0 END), 0) AS teams_passed,
+            COALESCE(COUNT(DISTINCT CASE WHEN s.depth = 0 THEN s.team ELSE NULL END), 0) AS teams_passed,
             COALESCE(COUNT(DISTINCT u.team), 0) AS teams_unlocked
         FROM puzzle AS p
         LEFT JOIN submission AS s
