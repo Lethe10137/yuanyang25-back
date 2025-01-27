@@ -1,3 +1,4 @@
+pub mod email;
 pub mod monitor;
 pub mod oracle;
 pub mod puzzle;

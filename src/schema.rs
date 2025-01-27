@@ -22,6 +22,15 @@ diesel::table! {
 }
 
 diesel::table! {
+    email (id) {
+        id -> Int4,
+        user -> Int4,
+        #[max_length = 255]
+        email_record -> Varchar,
+    }
+}
+
+diesel::table! {
     final_meta_submission (id) {
         id -> Int4,
         submission_id -> Int4,
@@ -154,6 +163,7 @@ diesel::table! {
 }
 
 diesel::joinable!(answer -> puzzle (puzzle));
+diesel::joinable!(email -> users (user));
 diesel::joinable!(final_meta_submission -> submission (submission_id));
 diesel::joinable!(oracle -> puzzle (puzzle));
 diesel::joinable!(oracle -> team (team));
@@ -171,6 +181,7 @@ diesel::joinable!(wrong_answer_cnt -> team (team));
 diesel::allow_tables_to_appear_in_same_query!(
     answer,
     decipher,
+    email,
     final_meta_submission,
     oracle,
     other_answer,

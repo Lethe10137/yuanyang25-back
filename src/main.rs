@@ -11,7 +11,7 @@ use actix_web::{web, App, HttpServer};
 use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
 use diesel_async::AsyncPgConnection;
 
-use server::api::{monitor, oracle, puzzle, register, team};
+use server::api::{email, monitor, oracle, puzzle, register, team};
 use server::util::{cache::Cache, cipher_util};
 
 use actix_session::{storage::CookieSessionStore, SessionMiddleware};
@@ -100,6 +100,8 @@ async fn main() -> std::io::Result<()> {
             .service(oracle::staff_list_oracle)
             .service(oracle::staff_reply_oracle)
             .service(oracle::staff_work_from)
+            .service(email::get_email)
+            .service(email::post_email)
     })
     .bind("0.0.0.0:9000")?
     .run()

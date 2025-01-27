@@ -353,6 +353,42 @@ where
     Ok(())
 }
 
+pub async fn insert_or_update_email<C>(
+    user_id: i32,
+    user_email: String,
+    conn: &mut C,
+) -> Result<(), APIError>
+where
+    C: DerefMut<Target = AsyncPgConnection> + std::marker::Send,
+{
+    use crate::schema::email::dsl::*;
+    diesel::insert_into(email)
+        .values((user.eq(user_id), email_record.eq(user_email.as_str())))
+        .on_conflict(user)
+        .do_update()
+        .set(email_record.eq(user_email.as_str()))
+        .execute(conn)
+        .await
+        .map_err(|e| new_unlocated_server_error(e, ERROR_DB_UNKNOWN))?;
+    Ok(())
+}
+
+pub async fn get_email_by_user<C>(user_id: i32, conn: &mut C) -> Result<Option<String>, Error>
+where
+    C: DerefMut<Target = AsyncPgConnection> + Send,
+{
+    use crate::schema::email::dsl::*;
+
+    let record = email
+        .filter(user.eq(user_id))
+        .select(email_record)
+        .first::<String>(conn)
+        .await
+        .optional()?; // 使用 `optional()` 返回 `None` 如果没有记录
+
+    Ok(record)
+}
+
 pub async fn get_oracle_by_id_and_team<C>(
     oracle_id: i32,
     team_id: i32,
