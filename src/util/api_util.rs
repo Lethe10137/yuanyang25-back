@@ -479,9 +479,13 @@ where
         .select(id)
         .order(id.asc()) // 按照id升序排列
         .first::<i32>(conn)
-        .await?;
+        .await;
 
-    Ok(Some(result))
+    match result {
+        Ok(i) => Ok(Some(i)),
+        Err(diesel::result::Error::NotFound) => Ok(None), // 如果没有找到记录
+        Err(e) => Err(e.into()),                          // 其他错误
+    }
 }
 
 use diesel::sql_types::{BigInt, Integer, Text};

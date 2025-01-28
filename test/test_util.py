@@ -26,7 +26,7 @@ print(url)
 
 def register(openid: int, raw_pw: str) -> int:
     pw = hashlib.sha256(raw_pw.encode()).hexdigest()
-    code = token_generator.get_token(2,4,openid).hex()
+    code = token_generator.get_token(2,0,openid).hex()
     s = requests.session()
     res = s.post(url + "/register", json={
         "username" : "test_{}".format(random.randint(0, 1000000)),
@@ -129,7 +129,7 @@ def prepare_users(user_cnt):
     team_id = -1
     
     for i in range(user_cnt):
-        pw = "pw{}".format(i+1)
+        pw = "30240184pw_{}".format(i+1)
         user_id =register(i, pw)
         users.append({
             "openid" : i,
@@ -186,3 +186,30 @@ def list_oracle(s: requests.Session, start_id: int):
         url + "/staff_list_oracle?start_oracle_id={}&limit=10".format(start_id), 
     )
     print(res.text, res)
+
+
+def register_staff(openid, pw, username):
+    pw = hashlib.sha256(pw.encode()).hexdigest()
+    code = token_generator.get_token(2,4,openid).hex()
+    s = requests.session()
+    res = s.post(url + "/register", json={
+        "username" : username,
+        "password" : pw,
+        "token" : code
+    })
+    
+    uid = res.json()['Success']
+    print("Id {} \t Staff {}".format( uid, username ))
+    return uid
+
+if __name__ == "__main__":
+    prepare_users(15)
+    
+    with open("test/example_data/staff.txt", "r") as f:
+        for line in f:
+            line = line.replace("\t", " ")
+            line = line.split()
+            if len(line) == 2:
+                register_staff(int(line[1], 16), "9787534XnJiKsWh", line[0])
+    
+    
